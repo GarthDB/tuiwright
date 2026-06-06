@@ -11,8 +11,9 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  check:
-    name: Check & Test
+  # ── Required gate 1: fmt + clippy + build + test ─────────────────────────
+  test:
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,7 +23,7 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Cache cargo registry
+      - name: Cache cargo
         uses: actions/cache@v4
         with:
           path: |
@@ -30,26 +31,79 @@ jobs:
             ~/.cargo/git
             target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-cargo-
 
       - name: fmt check
         run: cargo fmt --all -- --check
 
-      - name: clippy (no live feature — CI has no rmux daemon)
+      # live feature excluded: rmux-sdk API bindings not yet compile-verified
+      - name: clippy
         run: cargo clippy --no-default-features -- -D warnings
 
-      - name: build (no live feature)
+      - name: build
         run: cargo build --no-default-features
 
-      - name: test (no live feature)
+      - name: test
         run: cargo test --no-default-features
 
-  build-live:
-    name: Build with live feature
+  # ── Required gate 2: minimum supported Rust version ──────────────────────
+  msrv:
+    name: MSRV
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: build (live feature — compile-check only)
-        run: cargo build --features live 2>&1 || true
-        # rmux-sdk may not resolve cleanly in CI; this is a compile smoke test.
-        # Live tests require the rmux daemon and are run manually.
+
+      - name: Install Rust 1.88.0
+        uses: dtolnay/rust-toolchain@1.88.0
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-msrv-${{ hashFiles('**/Cargo.toml') }}
+
+      - name: build on MSRV
+        run: cargo build --no-default-features
+
+  # ── Required gate 3: security audit ─────────────────────────────────────
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: cargo audit
+        run: cargo audit
+
+  # ── Informational: live feature compile smoke test (non-blocking) ─────────
+  build-live:
+    name: Build (live feature)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-live-${{ hashFiles('**/Cargo.toml') }}
+
+      # rmux-sdk API bindings are written from docs; not yet compile-verified.
+      # This job is informational until the live path is validated against
+      # the real crate. Will graduate to required alongside the macOS matrix
+      # when live/PTY integration tests land.
+      - name: build with live feature
+        run: cargo build --features live
