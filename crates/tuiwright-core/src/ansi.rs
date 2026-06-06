@@ -18,7 +18,10 @@ pub fn grid_to_ansi(grid: &SnapshotGrid) -> String {
         let mut prev_style: Option<&CellStyle> = None;
         for cell in row {
             // Only emit SGR codes if style changed.
-            if prev_style.map(|p| styles_differ(p, &cell.style)).unwrap_or(true) {
+            if prev_style
+                .map(|p| styles_differ(p, &cell.style))
+                .unwrap_or(true)
+            {
                 out.push_str(&style_to_sgr(&cell.style));
             }
             out.push_str(&cell.symbol);

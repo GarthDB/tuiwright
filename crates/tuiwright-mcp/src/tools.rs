@@ -144,7 +144,9 @@ pub struct TuiHeadlessInput {
 impl TuiwrightServer {
     /// Open a live terminal pane and launch the TUI app inside it via rmux.
     /// Must be called before tui_send_keys / tui_snapshot / tui_wait_for.
-    #[tool(description = "Open a live terminal pane and launch the configured TUI app in it via rmux. Call this before tui_send_keys, tui_snapshot, or tui_wait_for.")]
+    #[tool(
+        description = "Open a live terminal pane and launch the configured TUI app in it via rmux. Call this before tui_send_keys, tui_snapshot, or tui_wait_for."
+    )]
     async fn tui_open(
         &self,
         Parameters(input): Parameters<TuiOpenInput>,
@@ -158,11 +160,7 @@ impl TuiwrightServer {
         {
             let cols = input.cols.unwrap_or(self.config.size.cols);
             let rows = input.rows.unwrap_or(self.config.size.rows);
-            let session_name = input
-                .session
-                .as_deref()
-                .unwrap_or("tuiwright")
-                .to_string();
+            let session_name = input.session.as_deref().unwrap_or("tuiwright").to_string();
 
             let command = input
                 .command
@@ -216,7 +214,9 @@ impl TuiwrightServer {
     }
 
     /// Send keystrokes to the live terminal pane.
-    #[tool(description = "Send keystrokes to the live terminal pane. Use \\r for Enter, \\x1b for Escape, \\x03 for Ctrl-C, \\x1b[A/B/C/D for arrow keys.")]
+    #[tool(
+        description = "Send keystrokes to the live terminal pane. Use \\r for Enter, \\x1b for Escape, \\x03 for Ctrl-C, \\x1b[A/B/C/D for arrow keys."
+    )]
     async fn tui_send_keys(
         &self,
         Parameters(input): Parameters<TuiSendKeysInput>,
@@ -243,7 +243,9 @@ impl TuiwrightServer {
     }
 
     /// Snapshot the current pane content as a text grid and/or PNG.
-    #[tool(description = "Snapshot the current live terminal pane. format: \"text\" (plain grid), \"image\" (PNG path, requires freeze), or \"both\" (default).")]
+    #[tool(
+        description = "Snapshot the current live terminal pane. format: \"text\" (plain grid), \"image\" (PNG path, requires freeze), or \"both\" (default)."
+    )]
     async fn tui_snapshot(
         &self,
         Parameters(input): Parameters<TuiSnapshotInput>,
@@ -275,7 +277,9 @@ impl TuiwrightServer {
     }
 
     /// Wait until the pane contains the given text (polling rmux).
-    #[tool(description = "Block until the live pane output contains `text`. timeout_ms defaults to 5000.")]
+    #[tool(
+        description = "Block until the live pane output contains `text`. timeout_ms defaults to 5000."
+    )]
     async fn tui_wait_for(
         &self,
         Parameters(input): Parameters<TuiWaitForInput>,
@@ -347,7 +351,9 @@ impl TuiwrightServer {
     }
 
     /// Start an asciinema recording of the live session.
-    #[tool(description = "Start an asciinema recording of the live terminal session. `path` is the output .cast file.")]
+    #[tool(
+        description = "Start an asciinema recording of the live terminal session. `path` is the output .cast file."
+    )]
     async fn tui_record_start(
         &self,
         Parameters(input): Parameters<TuiRecordStartInput>,
@@ -371,14 +377,16 @@ impl TuiwrightServer {
     #[tool(description = "Stop the in-progress asciinema recording and finalise the .cast file.")]
     async fn tui_record_stop(&self) -> Result<String, McpError> {
         let mut rec = self.recording.lock().await;
-        let path = rec.take().ok_or_else(|| {
-            McpError::invalid_params("no recording in progress", None)
-        })?;
+        let path = rec
+            .take()
+            .ok_or_else(|| McpError::invalid_params("no recording in progress", None))?;
         Ok(format!("recording stopped → {}", path.display()))
     }
 
     /// Convert an asciinema .cast file to a GIF via `agg`.
-    #[tool(description = "Convert an asciinema .cast file to a GIF using agg. Requires agg in $PATH.")]
+    #[tool(
+        description = "Convert an asciinema .cast file to a GIF using agg. Requires agg in $PATH."
+    )]
     async fn tui_to_gif(
         &self,
         Parameters(input): Parameters<TuiToGifInput>,
@@ -393,7 +401,9 @@ impl TuiwrightServer {
 
     /// Run the app headlessly (NDJSON replay) and return a text grid and/or PNG.
     /// Deterministic — no PTY, no rmux.  The fast inner loop for iterative development.
-    #[tool(description = "Run the TUI app headlessly by replaying an NDJSON message stream, then return the final rendered screen as a text grid and/or PNG (requires freeze). Deterministic and fast — the preferred inner loop for iterative development.")]
+    #[tool(
+        description = "Run the TUI app headlessly by replaying an NDJSON message stream, then return the final rendered screen as a text grid and/or PNG (requires freeze). Deterministic and fast — the preferred inner loop for iterative development."
+    )]
     async fn tui_headless(
         &self,
         Parameters(input): Parameters<TuiHeadlessInput>,
@@ -413,9 +423,9 @@ impl TuiwrightServer {
 
         // Split command into program + args (simple whitespace split — no shell quoting).
         let mut parts = cmd_str.split_whitespace();
-        let bin = parts.next().ok_or_else(|| {
-            McpError::invalid_params("headless_snapshot command is empty", None)
-        })?;
+        let bin = parts
+            .next()
+            .ok_or_else(|| McpError::invalid_params("headless_snapshot command is empty", None))?;
         let args: Vec<&str> = parts.collect();
 
         let output = tokio::process::Command::new(bin)
@@ -424,10 +434,9 @@ impl TuiwrightServer {
             .env("LINES", rows.to_string())
             .output()
             .await
-            .map_err(|e| McpError::internal_error(
-                format!("failed to run `{cmd_str}`: {e}"),
-                None,
-            ))?;
+            .map_err(|e| {
+                McpError::internal_error(format!("failed to run `{cmd_str}`: {e}"), None)
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -460,9 +469,7 @@ impl ServerHandler for TuiwrightServer {
                  use tui_open + tui_send_keys + tui_snapshot for live verification."
                     .into(),
             ),
-            capabilities: ServerCapabilities::builder()
-                .enable_tools()
-                .build(),
+            capabilities: ServerCapabilities::builder().enable_tools().build(),
             ..Default::default()
         }
     }
