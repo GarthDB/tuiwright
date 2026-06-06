@@ -1,0 +1,19 @@
+[package]
+name = "tuiwright-fixture"
+description = "Deterministic fixture TUI for testing the tuiwright headless loop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tuiwright-fixture"
+path = "src/main.rs"
+
+[dependencies]
+ratatui.workspace = true
+crossterm.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+anyhow.workspace = true

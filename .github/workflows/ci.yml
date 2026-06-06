@@ -33,6 +33,12 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.toml') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Install freeze (ANSI → PNG)
+        run: |
+          FREEZE_VER=0.2.2
+          curl -sSL "https://github.com/charmbracelet/freeze/releases/download/v${FREEZE_VER}/freeze_${FREEZE_VER}_amd64.deb" -o /tmp/freeze.deb
+          sudo dpkg -i /tmp/freeze.deb
+
       - name: fmt check
         run: cargo fmt --all -- --check
 

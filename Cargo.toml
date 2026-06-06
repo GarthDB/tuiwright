@@ -2,6 +2,7 @@
 members = [
     "crates/tuiwright-core",
     "crates/tuiwright-mcp",
+    "crates/tuiwright-fixture",
 ]
 resolver = "2"
 
@@ -23,6 +24,10 @@ rmux-sdk = "0.5"
 
 # Async runtime
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "fs"] }
+
+# TUI
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+crossterm = "0.28"
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

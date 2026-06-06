@@ -1,7 +1,9 @@
-//! Convert a [`SnapshotGrid`] to ANSI SGR-escaped text suitable for piping to
-//! `freeze` to produce a PNG screenshot.
+//! Encode and decode ANSI SGR-escaped text to/from [`SnapshotGrid`].
+//!
+//! `grid_to_ansi` encodes a grid → ANSI for piping to `freeze` (→ PNG).
+//! `ansi_to_grid` decodes ANSI SGR output → a styled grid for inspection.
 
-use crate::snapshot::{CellStyle, Color, SnapshotGrid};
+use crate::snapshot::{Cell, CellStyle, Color, SnapshotGrid};
 
 /// Render a [`SnapshotGrid`] as a string containing ANSI SGR escape sequences.
 ///
@@ -102,6 +104,142 @@ fn color_bg_code(c: &Color) -> String {
     }
 }
 
+/// Parse an ANSI SGR-escaped string into a [`SnapshotGrid`].
+///
+/// The input is expected to be in the format produced by [`grid_to_ansi`]:
+/// each row ends with `\n`, cells carry SGR codes that encode style, and CSI
+/// sequences other than SGR (`m`) are ignored.
+///
+/// The decoder is faithful to the encoder: every style emitted by `grid_to_ansi`
+/// round-trips exactly back to the original `CellStyle`.
+pub fn ansi_to_grid(input: &str, cols: u16, rows: u16) -> SnapshotGrid {
+    let col_usize = cols as usize;
+    let row_usize = rows as usize;
+    let mut cells = vec![Cell::default(); col_usize * row_usize];
+    let mut cur_style = CellStyle::default();
+    let mut cur_row = 0usize;
+    let mut cur_col = 0usize;
+
+    let bytes = input.as_bytes();
+    let mut i = 0;
+
+    while i < bytes.len() {
+        if cur_row >= row_usize {
+            break;
+        }
+
+        if bytes[i] == b'\x1b' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
+            // CSI sequence: ESC [ <params> <final_byte>
+            i += 2; // skip ESC [
+            let param_start = i;
+            // Collect intermediate/parameter bytes (0x20–0x3F) until final byte (0x40–0x7E).
+            while i < bytes.len() && !(0x40..=0x7E).contains(&bytes[i]) {
+                i += 1;
+            }
+            let final_byte = bytes.get(i).copied().unwrap_or(b'm');
+            let params_str = std::str::from_utf8(&bytes[param_start..i]).unwrap_or("");
+            if final_byte == b'm' {
+                apply_sgr(params_str, &mut cur_style);
+            }
+            // Skip the final byte.
+            if i < bytes.len() {
+                i += 1;
+            }
+        } else if bytes[i] == b'\n' {
+            // End of row — advance to next row.
+            cur_row += 1;
+            cur_col = 0;
+            cur_style = CellStyle::default(); // encoder resets at row start/end
+            i += 1;
+        } else if bytes[i] == b'\r' {
+            i += 1;
+        } else {
+            // UTF-8 character: consume all continuation bytes.
+            let ch_start = i;
+            i += 1;
+            while i < bytes.len() && bytes[i] & 0xC0 == 0x80 {
+                i += 1;
+            }
+            if cur_col < col_usize && cur_row < row_usize {
+                let sym = std::str::from_utf8(&bytes[ch_start..i]).unwrap_or(" ");
+                cells[cur_row * col_usize + cur_col] = Cell {
+                    symbol: sym.to_string(),
+                    style: cur_style.clone(),
+                };
+                cur_col += 1;
+            }
+        }
+    }
+
+    SnapshotGrid { cols, rows, cells }
+}
+
+/// Apply a semicolon-delimited list of SGR parameters to `style`.
+fn apply_sgr(params: &str, style: &mut CellStyle) {
+    if params.is_empty() {
+        // ESC[m == ESC[0m
+        *style = CellStyle::default();
+        return;
+    }
+    let nums: Vec<u16> = params.split(';').filter_map(|s| s.parse().ok()).collect();
+    let mut j = 0usize;
+    while j < nums.len() {
+        match nums[j] {
+            0 => *style = CellStyle::default(),
+            1 => style.bold = true,
+            2 => style.dim = true,
+            3 => style.italic = true,
+            4 => style.underline = true,
+            // Standard fg colors (30–37 → Ansi 0–7).
+            30..=37 => style.fg = Some(Color::Ansi((nums[j] - 30) as u8)),
+            // Bright fg (90–97 → Ansi 8–15; encoder uses 82+n for n≥8).
+            90..=97 => style.fg = Some(Color::Ansi((nums[j] - 82) as u8)),
+            // Extended fg (38;5;n or 38;2;r;g;b).
+            38 => match nums.get(j + 1).copied() {
+                Some(5) => {
+                    if let Some(&n) = nums.get(j + 2) {
+                        style.fg = Some(Color::Indexed(n as u8));
+                        j += 2;
+                    }
+                }
+                Some(2) => {
+                    if let (Some(&r), Some(&g), Some(&b)) =
+                        (nums.get(j + 2), nums.get(j + 3), nums.get(j + 4))
+                    {
+                        style.fg = Some(Color::Rgb(r as u8, g as u8, b as u8));
+                        j += 4;
+                    }
+                }
+                _ => {}
+            },
+            // Standard bg colors (40–47 → Ansi 0–7).
+            40..=47 => style.bg = Some(Color::Ansi((nums[j] - 40) as u8)),
+            // Bright bg (100–107 → Ansi 8–15; encoder uses 92+n for n≥8).
+            100..=107 => style.bg = Some(Color::Ansi((nums[j] - 92) as u8)),
+            // Extended bg (48;5;n or 48;2;r;g;b).
+            48 => match nums.get(j + 1).copied() {
+                Some(5) => {
+                    if let Some(&n) = nums.get(j + 2) {
+                        style.bg = Some(Color::Indexed(n as u8));
+                        j += 2;
+                    }
+                }
+                Some(2) => {
+                    if let (Some(&r), Some(&g), Some(&b)) =
+                        (nums.get(j + 2), nums.get(j + 3), nums.get(j + 4))
+                    {
+                        style.bg = Some(Color::Rgb(r as u8, g as u8, b as u8));
+                        j += 4;
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        }
+        j += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -139,5 +277,91 @@ mod tests {
             })
             .0;
         assert_eq!(plain, "hello");
+    }
+
+    /// Round-trip: grid_to_ansi → ansi_to_grid must reproduce symbols and styles.
+    #[test]
+    fn styled_roundtrip() {
+        let styles = [
+            CellStyle {
+                fg: Some(Color::Ansi(1)), // red
+                bg: None,
+                bold: true,
+                italic: false,
+                underline: false,
+                dim: false,
+            },
+            CellStyle {
+                fg: Some(Color::Ansi(10)), // bright green
+                bg: Some(Color::Ansi(4)),  // blue bg
+                bold: false,
+                italic: true,
+                underline: false,
+                dim: false,
+            },
+            CellStyle {
+                fg: Some(Color::Indexed(220)),
+                bg: Some(Color::Indexed(18)),
+                bold: false,
+                italic: false,
+                underline: true,
+                dim: false,
+            },
+            CellStyle {
+                fg: Some(Color::Rgb(255, 128, 0)),
+                bg: Some(Color::Rgb(0, 32, 64)),
+                bold: true,
+                italic: false,
+                underline: false,
+                dim: true,
+            },
+        ];
+        let symbols = ["A", "B", "C", "D"];
+        let cells: Vec<Cell> = symbols
+            .iter()
+            .zip(styles.iter())
+            .map(|(sym, st)| Cell {
+                symbol: sym.to_string(),
+                style: st.clone(),
+            })
+            .collect();
+
+        let grid = SnapshotGrid {
+            cols: 4,
+            rows: 1,
+            cells: cells.clone(),
+        };
+
+        let ansi = grid_to_ansi(&grid);
+        let decoded = ansi_to_grid(&ansi, 4, 1);
+
+        assert_eq!(decoded.cols, 4);
+        assert_eq!(decoded.rows, 1);
+        assert_eq!(decoded.cells.len(), 4);
+
+        for (i, (orig, got)) in cells.iter().zip(decoded.cells.iter()).enumerate() {
+            assert_eq!(orig.symbol, got.symbol, "symbol mismatch at cell {i}");
+            assert_eq!(orig.style.bold, got.style.bold, "bold mismatch at cell {i}");
+            assert_eq!(
+                orig.style.italic, got.style.italic,
+                "italic mismatch at cell {i}"
+            );
+            assert_eq!(
+                orig.style.underline, got.style.underline,
+                "underline mismatch at cell {i}"
+            );
+            assert_eq!(orig.style.dim, got.style.dim, "dim mismatch at cell {i}");
+            // Color comparison via the code representation.
+            assert_eq!(
+                orig.style.fg.as_ref().map(color_code),
+                got.style.fg.as_ref().map(color_code),
+                "fg mismatch at cell {i}"
+            );
+            assert_eq!(
+                orig.style.bg.as_ref().map(color_code),
+                got.style.bg.as_ref().map(color_code),
+                "bg mismatch at cell {i}"
+            );
+        }
     }
 }

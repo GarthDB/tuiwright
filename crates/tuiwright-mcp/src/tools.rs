@@ -447,7 +447,7 @@ impl TuiwrightServer {
         }
 
         let ansi_output = String::from_utf8_lossy(&output.stdout).to_string();
-        let grid = ansi_to_grid(&ansi_output, cols, rows);
+        let grid = tuiwright_core::ansi_to_grid(&ansi_output, cols, rows);
 
         render_snapshot(&grid, &input.format)
             .await
@@ -506,53 +506,6 @@ fn tmp_png_path() -> std::path::PathBuf {
         .unwrap_or_default()
         .as_millis();
     std::env::temp_dir().join(format!("tuiwright_{ts}.png"))
-}
-
-/// Parse ANSI output into a SnapshotGrid (strips escape sequences for text;
-/// colour decoding is deferred to the full SGR parser in a later phase).
-fn ansi_to_grid(ansi: &str, cols: u16, rows: u16) -> tuiwright_core::SnapshotGrid {
-    use tuiwright_core::snapshot::Cell;
-    let plain = strip_ansi(ansi);
-    let col_usize = cols as usize;
-    let row_usize = rows as usize;
-    let mut cells = Vec::with_capacity(col_usize * row_usize);
-
-    for line in plain.lines().take(row_usize) {
-        let chars: Vec<char> = line.chars().collect();
-        for col in 0..col_usize {
-            cells.push(Cell {
-                symbol: chars
-                    .get(col)
-                    .map(|c| c.to_string())
-                    .unwrap_or_else(|| " ".to_string()),
-                style: Default::default(),
-            });
-        }
-    }
-    while cells.len() < col_usize * row_usize {
-        cells.push(Cell::default());
-    }
-
-    tuiwright_core::SnapshotGrid { cols, rows, cells }
-}
-
-/// Strip ANSI CSI escape sequences from a string.
-fn strip_ansi(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\x1b' {
-            // Consume until we hit a final byte (@ through ~).
-            for c in chars.by_ref() {
-                if c.is_ascii_alphabetic() || c == '~' {
-                    break;
-                }
-            }
-        } else {
-            out.push(ch);
-        }
-    }
-    out
 }
 
 /// Convert an rmux pane snapshot to a tuiwright SnapshotGrid.
