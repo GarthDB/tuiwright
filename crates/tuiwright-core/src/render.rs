@@ -34,7 +34,11 @@ pub async fn grid_to_png(grid: &SnapshotGrid, output: &Path) -> Result<()> {
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .spawn()
-        .context("failed to spawn `freeze` — is it installed and in $PATH?")?;
+        .context(
+            "failed to spawn `freeze` — install it first:\n\
+             • macOS:  brew install charmbracelet/tap/freeze\n\
+             • Linux:  go install github.com/charmbracelet/freeze@latest",
+        )?;
 
     // Write ANSI to stdin.
     if let Some(mut stdin) = child.stdin.take() {
