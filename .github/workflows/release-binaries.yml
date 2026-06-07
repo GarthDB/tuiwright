@@ -1,8 +1,9 @@
 name: Release binaries
 
 on:
-  release:
-    types: [published]
+  push:
+    tags:
+      - 'tuiwright-mcp-v*'
 
 jobs:
   build:
