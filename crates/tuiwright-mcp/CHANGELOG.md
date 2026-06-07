@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/GarthDB/tuiwright/compare/tuiwright-mcp-v0.1.1...tuiwright-mcp-v0.2.0) - 2026-06-07
+
+### Added
+
+- add cursor-position awareness to SnapshotGrid
+
+### Other
+
+- bump to 0.2.0 and fix rustfmt
+- Merge branch 'main' into feat/cursor-tracking
+
 ## [0.1.1](https://github.com/GarthDB/tuiwright/compare/tuiwright-mcp-v0.1.0...tuiwright-mcp-v0.1.1) - 2026-06-07
 
 ### Other
