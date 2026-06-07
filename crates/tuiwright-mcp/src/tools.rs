@@ -23,19 +23,25 @@ pub struct TuiwrightServer {
     /// Active live session (rmux), if any.
     #[cfg(feature = "live")]
     session: Arc<Mutex<Option<LiveSession>>>,
-    /// Path to an in-progress asciinema recording, if any.
-    recording: Arc<Mutex<Option<std::path::PathBuf>>>,
+    /// Active asciinema recording, if any.
+    recording: Arc<Mutex<Option<RecordingState>>>,
     /// ToolRouter must be stored on the struct (rmcp 0.16 pattern).
     tool_router: rmcp::handler::server::tool::ToolRouter<Self>,
 }
 
+/// A live rmux session. Not Clone — stored inside Arc<Mutex<...>>.
 #[cfg(feature = "live")]
-#[derive(Clone)]
 struct LiveSession {
-    name: String,
-    client: rmux_sdk::Rmux,
+    session: rmux_sdk::Session,
     cols: u16,
     rows: u16,
+}
+
+/// State for an in-progress asciinema v2 recording.
+struct RecordingState {
+    path: std::path::PathBuf,
+    file: std::fs::File,
+    start: std::time::Instant,
 }
 
 impl TuiwrightServer {
@@ -160,7 +166,7 @@ impl TuiwrightServer {
         {
             let cols = input.cols.unwrap_or(self.config.size.cols);
             let rows = input.rows.unwrap_or(self.config.size.rows);
-            let session_name = input.session.as_deref().unwrap_or("tuiwright").to_string();
+            let session_name_str = input.session.as_deref().unwrap_or("tuiwright").to_string();
 
             let command = input
                 .command
@@ -172,11 +178,6 @@ impl TuiwrightServer {
                     )
                 })?;
 
-            let client = rmux_sdk::Rmux::builder()
-                .connect_or_start()
-                .await
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-
             let mut full_cmd = command.clone();
             for arg in &self.config.launch.args {
                 full_cmd.push(' ');
@@ -187,28 +188,33 @@ impl TuiwrightServer {
                 full_cmd.push_str(arg);
             }
 
-            let size = rmux_sdk::TerminalSizeSpec::new(cols, rows);
-            client
+            let client = rmux_sdk::Rmux::builder()
+                .connect_or_start()
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+            let sess_name = rmux_sdk::SessionName::new(&session_name_str)
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+            let rmux_session = client
                 .ensure_session(
-                    rmux_sdk::SessionName::new(&session_name)
-                        .map_err(|e| McpError::internal_error(e.to_string(), None))?,
-                    &full_cmd,
-                    size,
-                    rmux_sdk::SessionPolicy::RecreateIfExists,
+                    rmux_sdk::EnsureSession::named(sess_name)
+                        .shell(&full_cmd)
+                        .size(rmux_sdk::TerminalSizeSpec::new(cols, rows))
+                        .create_or_reuse(),
                 )
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
 
             let mut guard = self.session.lock().await;
             *guard = Some(LiveSession {
-                name: session_name.clone(),
-                client,
+                session: rmux_session,
                 cols,
                 rows,
             });
 
             Ok(format!(
-                "Live pane opened: session={session_name}, size={cols}x{rows}, command={command}"
+                "Live pane opened: session={session_name_str}, size={cols}x{rows}, command={command}"
             ))
         }
     }
@@ -233,8 +239,8 @@ impl TuiwrightServer {
                 McpError::invalid_params("no live session — call tui_open first", None)
             })?;
             session
-                .client
-                .pane(&session.name, 0, 0)
+                .session
+                .pane(0, 0)
                 .send_text(&input.keys)
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -262,14 +268,17 @@ impl TuiwrightServer {
                 McpError::invalid_params("no live session — call tui_open first", None)
             })?;
 
-            let snapshot = session
-                .client
-                .pane(&session.name, 0, 0)
+            let pane = session.session.pane(0, 0);
+            let snapshot = pane
                 .snapshot()
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            let grid = rmux_snapshot_to_grid(snapshot);
+            drop(guard);
 
-            let grid = rmux_snapshot_to_grid(snapshot, session.cols, session.rows);
+            // Append frame to active recording.
+            append_recording_frame(&self.recording, &grid).await;
+
             render_snapshot(&grid, &input.format)
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))
@@ -296,11 +305,20 @@ impl TuiwrightServer {
             let session = guard.as_ref().ok_or_else(|| {
                 McpError::invalid_params("no live session — call tui_open first", None)
             })?;
-            session
-                .client
-                .pane(&session.name, 0, 0)
-                .wait_for_text(&input.text, timeout)
+            let pane = session.session.pane(0, 0);
+            drop(guard);
+            tokio::time::timeout(timeout, pane.wait_for_text(&input.text))
                 .await
+                .map_err(|_| {
+                    McpError::invalid_params(
+                        format!(
+                            "timed out after {}ms waiting for {:?}",
+                            input.timeout_ms.unwrap_or(5000),
+                            input.text
+                        ),
+                        None,
+                    )
+                })?
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             Ok(format!("found: {:?}", input.text))
         }
@@ -325,8 +343,9 @@ impl TuiwrightServer {
             })?;
             let size = rmux_sdk::TerminalSizeSpec::new(input.cols, input.rows);
             session
-                .client
-                .resize_pane(&session.name, 0, 0, size)
+                .session
+                .pane(0, 0)
+                .resize(size)
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
             session.cols = input.cols;
@@ -344,20 +363,22 @@ impl TuiwrightServer {
         {
             let mut guard = self.session.lock().await;
             if let Some(session) = guard.take() {
-                session.client.kill_session(&session.name).await.ok();
+                session.session.kill().await.ok();
             }
             Ok("session closed".to_string())
         }
     }
 
-    /// Start an asciinema recording of the live session.
+    /// Start an asciinema v2 recording. Frames are appended on each tui_snapshot call.
     #[tool(
-        description = "Start an asciinema recording of the live terminal session. `path` is the output .cast file."
+        description = "Start an asciinema v2 recording. Each tui_snapshot call appends a frame. `path` is the output .cast file."
     )]
     async fn tui_record_start(
         &self,
         Parameters(input): Parameters<TuiRecordStartInput>,
     ) -> Result<String, McpError> {
+        use std::io::Write;
+
         let path = std::path::PathBuf::from(&input.path);
         let mut rec = self.recording.lock().await;
         if rec.is_some() {
@@ -366,21 +387,60 @@ impl TuiwrightServer {
                 None,
             ));
         }
-        *rec = Some(path.clone());
+
+        // Determine terminal size: prefer live session, fall back to config.
+        let (cols, rows) = {
+            #[cfg(feature = "live")]
+            {
+                let s = self.session.lock().await;
+                s.as_ref()
+                    .map(|ls| (ls.cols, ls.rows))
+                    .unwrap_or((self.config.size.cols, self.config.size.rows))
+            }
+            #[cfg(not(feature = "live"))]
+            (self.config.size.cols, self.config.size.rows)
+        };
+
+        let mut file = std::fs::File::create(&path).map_err(|e| {
+            McpError::internal_error(format!("cannot create {}: {e}", path.display()), None)
+        })?;
+
+        // Write asciinema v2 header.
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let header = serde_json::json!({
+            "version": 2,
+            "width": cols,
+            "height": rows,
+            "timestamp": ts,
+            "title": "tuiwright recording"
+        });
+        writeln!(file, "{header}").map_err(|e| McpError::internal_error(e.to_string(), None))?;
+
+        *rec = Some(RecordingState {
+            path: path.clone(),
+            file,
+            start: std::time::Instant::now(),
+        });
+
         Ok(format!(
-            "recording started → {} (asciinema integration: phase 4)",
-            path.display()
+            "recording started → {} ({}x{})",
+            path.display(),
+            cols,
+            rows
         ))
     }
 
-    /// Stop the current asciinema recording.
+    /// Stop the current asciinema recording and finalise the .cast file.
     #[tool(description = "Stop the in-progress asciinema recording and finalise the .cast file.")]
     async fn tui_record_stop(&self) -> Result<String, McpError> {
         let mut rec = self.recording.lock().await;
-        let path = rec
+        let state = rec
             .take()
             .ok_or_else(|| McpError::invalid_params("no recording in progress", None))?;
-        Ok(format!("recording stopped → {}", path.display()))
+        Ok(format!("recording stopped → {}", state.path.display()))
     }
 
     /// Convert an asciinema .cast file to a GIF via `agg`.
@@ -449,6 +509,9 @@ impl TuiwrightServer {
         let ansi_output = String::from_utf8_lossy(&output.stdout).to_string();
         let grid = tuiwright_core::ansi_to_grid(&ansi_output, cols, rows);
 
+        // Append frame to active recording (if any) — headless sessions are recordable too.
+        append_recording_frame(&self.recording, &grid).await;
+
         render_snapshot(&grid, &input.format)
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))
@@ -488,11 +551,17 @@ async fn render_snapshot(
     match format {
         SnapshotFormat::Text => Ok(format!("```\n{text}```")),
         SnapshotFormat::Image => {
+            if !tuiwright_core::render::freeze_available().await {
+                return Ok("freeze not found in $PATH — install with: brew install charmbracelet/tap/freeze".to_string());
+            }
             let png = tmp_png_path();
             tuiwright_core::render::grid_to_png(grid, &png).await?;
             Ok(format!("PNG saved to {}", png.display()))
         }
         SnapshotFormat::Both => {
+            if !tuiwright_core::render::freeze_available().await {
+                return Ok(format!("freeze not found — text only:\n```\n{text}```"));
+            }
             let png = tmp_png_path();
             tuiwright_core::render::grid_to_png(grid, &png).await?;
             Ok(format!("PNG: {}\n\n```\n{text}```", png.display()))
@@ -508,37 +577,61 @@ fn tmp_png_path() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("tuiwright_{ts}.png"))
 }
 
+/// Append the current grid as an asciinema event to the active recording (if any).
+async fn append_recording_frame(
+    recording: &Arc<Mutex<Option<RecordingState>>>,
+    grid: &tuiwright_core::SnapshotGrid,
+) {
+    use std::io::Write;
+    let mut rec_guard = recording.lock().await;
+    if let Some(rec) = rec_guard.as_mut() {
+        let ansi = tuiwright_core::ansi::grid_to_ansi(grid);
+        let elapsed = rec.start.elapsed().as_secs_f64();
+        let event = serde_json::json!([elapsed, "o", ansi]);
+        let _ = writeln!(rec.file, "{event}");
+    }
+}
+
 /// Convert an rmux pane snapshot to a tuiwright SnapshotGrid.
 #[cfg(feature = "live")]
-fn rmux_snapshot_to_grid(
-    snapshot: rmux_sdk::PaneSnapshot,
-    cols: u16,
-    rows: u16,
-) -> tuiwright_core::SnapshotGrid {
+fn rmux_snapshot_to_grid(snapshot: rmux_sdk::PaneSnapshot) -> tuiwright_core::SnapshotGrid {
     use tuiwright_core::snapshot::{Cell, CellStyle, Color};
+
+    let map_color = |c: &rmux_sdk::PaneColor| -> Option<Color> {
+        match c {
+            rmux_sdk::PaneColor::Ansi { index } => Some(Color::Ansi(*index)),
+            // BrightAnsi index is 0-7; map to Ansi 8-15 in our scheme.
+            rmux_sdk::PaneColor::BrightAnsi { index } => Some(Color::Ansi(*index + 8)),
+            rmux_sdk::PaneColor::Indexed { index } => Some(Color::Indexed(*index)),
+            rmux_sdk::PaneColor::Rgb { red, green, blue } => Some(Color::Rgb(*red, *green, *blue)),
+            // Default, None, Terminal, Encoded — no colour info.
+            _ => None,
+        }
+    };
 
     let cells = snapshot
         .cells
-        .into_iter()
-        .map(|c| {
-            let map_color = |col: rmux_sdk::Color| match col {
-                rmux_sdk::Color::Ansi(n) => Color::Ansi(n),
-                rmux_sdk::Color::Indexed(n) => Color::Indexed(n),
-                rmux_sdk::Color::Rgb(r, g, b) => Color::Rgb(r, g, b),
-            };
-            Cell {
-                symbol: c.symbol,
-                style: CellStyle {
-                    fg: c.fg.map(map_color),
-                    bg: c.bg.map(map_color),
-                    bold: c.bold,
-                    italic: c.italic,
-                    underline: c.underline,
-                    dim: c.dim,
-                },
-            }
+        .iter()
+        .map(|c| Cell {
+            symbol: if c.glyph.padding {
+                " ".to_string()
+            } else {
+                c.glyph.text.clone()
+            },
+            style: CellStyle {
+                fg: map_color(&c.foreground),
+                bg: map_color(&c.background),
+                bold: c.attributes.contains(rmux_sdk::PaneAttributes::BOLD),
+                italic: c.attributes.contains(rmux_sdk::PaneAttributes::ITALIC),
+                underline: c.attributes.contains(rmux_sdk::PaneAttributes::UNDERLINE),
+                dim: c.attributes.contains(rmux_sdk::PaneAttributes::DIM),
+            },
         })
         .collect();
 
-    tuiwright_core::SnapshotGrid { cols, rows, cells }
+    tuiwright_core::SnapshotGrid {
+        cols: snapshot.cols,
+        rows: snapshot.rows,
+        cells,
+    }
 }
