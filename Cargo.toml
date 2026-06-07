@@ -16,6 +16,9 @@ authors = ["Garth Braithwaite <garthdb@adobe.com>"]
 rust-version = "1.88"
 
 [workspace.dependencies]
+# Internal crates
+tuiwright-core = { path = "crates/tuiwright-core", version = "0.1.0" }
+
 # MCP
 rmcp = { version = "0.16", features = ["server", "transport-io"] }
 
