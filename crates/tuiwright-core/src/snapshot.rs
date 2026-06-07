@@ -4,6 +4,8 @@
 //! and live paths produce a `SnapshotGrid`; downstream code renders it to
 //! plain text or ANSI SGR (→ freeze → PNG).
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 
 /// A full snapshot of a terminal pane at a point in time.
@@ -16,6 +18,22 @@ pub struct SnapshotGrid {
 }
 
 impl SnapshotGrid {
+    /// Save this grid as a JSON baseline file.
+    pub fn save_baseline(&self, path: &Path) -> anyhow::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    /// Load a previously saved baseline from a JSON file.
+    pub fn load_baseline(path: &Path) -> anyhow::Result<Self> {
+        let raw = std::fs::read_to_string(path)?;
+        Ok(serde_json::from_str(&raw)?)
+    }
+
     /// Render the grid as plain text (no ANSI codes), one row per line, with
     /// trailing whitespace stripped from each row.
     pub fn to_plain_text(&self) -> String {

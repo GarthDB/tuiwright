@@ -26,6 +26,10 @@ pub struct Config {
     ///
     /// `{}` is substituted with the NDJSON file path at runtime.
     pub headless_snapshot: Option<String>,
+
+    /// Directory where baseline `.snap.json` files are stored.
+    /// Defaults to `.tuiwright/baselines` relative to the working directory.
+    pub baseline_dir: Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

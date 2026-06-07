@@ -2,6 +2,8 @@
 
 > **Playwright-style tools for developing TUI apps with AI agents.**
 
+See [ROADMAP.md](ROADMAP.md) for the milestone plan.
+
 tuiwright is an MCP (Model Context Protocol) server that gives Claude Code a
 tight feedback loop for building terminal UIs — the same way Claude uses
 Playwright to iterate on web UIs.
