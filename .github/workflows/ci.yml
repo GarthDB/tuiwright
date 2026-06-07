@@ -129,3 +129,28 @@ jobs:
       - name: cargo audit
         run: cargo audit
 
+  # ── Required gate 5: semver compatibility ────────────────────────────────
+  semver-checks:
+    name: Semver checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags are needed for --baseline-rev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-semver-checks
+        uses: taiki-e/install-action@cargo-semver-checks
+
+      - name: Find latest tuiwright-core release tag
+        id: baseline
+        run: |
+          tag=$(git tag --list 'tuiwright-core-v*' --sort=-version:refname | head -1)
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: cargo semver-checks
+        if: steps.baseline.outputs.tag != ''
+        run: cargo semver-checks --package tuiwright-core --baseline-rev ${{ steps.baseline.outputs.tag }}
+

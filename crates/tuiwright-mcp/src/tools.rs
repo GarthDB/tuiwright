@@ -303,7 +303,17 @@ impl TuiwrightServer {
             let client = rmux_sdk::Rmux::builder()
                 .connect_or_start()
                 .await
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                .map_err(|e| {
+                    McpError::internal_error(
+                        format!(
+                            "failed to connect to rmux daemon: {e}\n\
+                             Install rmux and start the daemon:\n\
+                             • cargo install rmux  (or see https://github.com/Helvesec/rmux/releases)\n\
+                             • rmux start"
+                        ),
+                        None,
+                    )
+                })?;
 
             let sess_name = rmux_sdk::SessionName::new(&session_name_str)
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;

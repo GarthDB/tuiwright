@@ -2,8 +2,9 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Default terminal size used when `tuiwright.toml` doesn't specify one.
+/// Default terminal width in columns when `tuiwright.toml` doesn't specify one.
 pub const DEFAULT_COLS: u16 = 80;
+/// Default terminal height in rows when `tuiwright.toml` doesn't specify one.
 pub const DEFAULT_ROWS: u16 = 24;
 
 /// Root configuration, read from `tuiwright.toml` in the project root (or
@@ -33,6 +34,7 @@ pub struct Config {
     pub baseline_dir: std::path::PathBuf,
 }
 
+/// How to launch the TUI app in a live rmux session.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LaunchConfig {
     /// Path to the TUI binary (or shell command).
@@ -45,9 +47,12 @@ pub struct LaunchConfig {
     pub env: std::collections::HashMap<String, String>,
 }
 
+/// Terminal dimensions used as defaults for headless snapshots and live sessions.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SizeConfig {
+    /// Terminal width in columns.
     pub cols: u16,
+    /// Terminal height in rows.
     pub rows: u16,
 }
 
