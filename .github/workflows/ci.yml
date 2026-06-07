@@ -135,6 +135,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags are needed for --baseline-rev
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -142,6 +144,13 @@ jobs:
       - name: Install cargo-semver-checks
         uses: taiki-e/install-action@cargo-semver-checks
 
+      - name: Find latest tuiwright-core release tag
+        id: baseline
+        run: |
+          tag=$(git tag --list 'tuiwright-core-v*' --sort=-version:refname | head -1)
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
       - name: cargo semver-checks
-        run: cargo semver-checks --package tuiwright-core
+        if: steps.baseline.outputs.tag != ''
+        run: cargo semver-checks --package tuiwright-core --baseline-rev ${{ steps.baseline.outputs.tag }}
 

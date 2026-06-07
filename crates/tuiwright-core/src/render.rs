@@ -37,7 +37,7 @@ pub async fn grid_to_png(grid: &SnapshotGrid, output: &Path) -> Result<()> {
         .context(
             "failed to spawn `freeze` — install it first:\n\
              • macOS:  brew install charmbracelet/tap/freeze\n\
-             • Linux:  go install github.com/charmbracelet/freeze@latest",
+             • Linux:  https://github.com/charmbracelet/freeze/releases (download prebuilt binary)",
         )?;
 
     // Write ANSI to stdin.
