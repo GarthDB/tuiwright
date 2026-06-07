@@ -20,60 +20,46 @@ as a required CI gate.
 
 ---
 
-## M3 — Expand tool surface  `tuiwright-41r`
-**Goal:** turn "see the TUI" into "verify the TUI" with visual diffing and assertions.
-
-| # | Task | Bead |
-|---|------|------|
-| 1 | `diff` module in `tuiwright-core`: cell-by-cell `SnapshotGrid` comparison | `tuiwright-41r.1` |
-| 2 | Baseline persistence: `.snap.json` read/write, `baseline_dir` in `Config` | `tuiwright-41r.2` |
-| 3 | `tui_diff` MCP tool: diff current snapshot vs saved baseline | `tuiwright-41r.3` |
-| 4 | `tui_assert` MCP tool: text/style assertions with focused diff on failure | `tuiwright-41r.4` |
-| 5 | Tests against `tuiwright-fixture` exercising diff + assert | `tuiwright-41r.5` |
-
-**Done when:** a baseline can be created, a later run diffs against it, and `tui_assert`
-passes/fails with clear output; all covered by the `--no-default-features` test gate.
+## ✅ M3 — Expand tool surface  *(shipped)*
+`diff` module, baseline persistence (`.snap.json`), `tui_diff` and `tui_assert` MCP
+tools with focused diff output on failure. All covered by the `--no-default-features`
+test gate.
+**PR:** [#6](https://github.com/GarthDB/tuiwright/pull/6)
 
 ---
 
-## M4 — Harden & test  `tuiwright-btv`
-**Goal:** raise confidence on the live path and ANSI decoder before others depend on them.
-
-| # | Task | Bead |
-|---|------|------|
-| 1 | Live-path integration test (rmux-gated, like `freeze_available()`) | `tuiwright-btv.1` |
-| 2 | ANSI decode edge cases: cursor moves, partial SGR, multi-byte graphemes | `tuiwright-btv.2` |
-| 3 | Error-path coverage: no session, timeout, absent `freeze`/`agg` | `tuiwright-btv.3` |
-| 4 | CI: macOS matrix, `freeze` in `build-live` | `tuiwright-btv.4` |
-
-**Done when:** the live path has ≥1 real end-to-end test, decoder edge cases are covered,
-and CI exercises the image branch on at least one runner.
+## ✅ M4 — Harden & test  *(shipped)*
+Live-path integration test (rmux-gated), ANSI decode edge cases (cursor moves, partial
+SGR, multi-byte graphemes), error-path coverage, macOS matrix in CI.
+**PR:** [#7](https://github.com/GarthDB/tuiwright/pull/7)
 
 ---
 
-## M5 — Dogfood (spectrum-design-data)  `tuiwright-hrs`
-**Goal:** prove the loop on the real Spectrum Design Data TUI — the reason this project exists.
-
-| # | Task | Bead |
-|---|------|------|
-| 1 | Example NDJSON replays + golden snapshots for key screens | `tuiwright-hrs.1` |
-| 2 | Documented walkthrough of Claude driving the TUI via MCP tools | `tuiwright-hrs.2` |
-| 3 | Decide regression-test boundary (tuiwright vs design-data repo) | `tuiwright-hrs.3` |
-
-**Done when:** a reproducible example shows tuiwright capturing and verifying the real
-design-data TUI, runnable from the README.
+## ✅ M5 — Dogfood (spectrum-design-data)  *(shipped)*
+End-to-end example replays and golden snapshots for spectrum-design-data screens.
+Documented walkthrough of Claude driving the TUI via MCP tools.
+**PR:** [#8](https://github.com/GarthDB/tuiwright/pull/8)
 
 ---
 
-## M6 — Publish & distribute  `tuiwright-0ql`
-**Goal:** make tuiwright installable and contributable by others.
+## ✅ M6 — Publish & distribute  *(shipped)*
+CLAUDE.md filled, CONTRIBUTING.md and CHANGELOG.md added, crates.io metadata, release-plz
+automation (auto release PRs + crates.io publish), binary distribution via GitHub Actions.
+**PR:** [#9](https://github.com/GarthDB/tuiwright/pull/9)
+
+---
+
+## M7 — Stability & docs  `tuiwright-675`
+**Goal:** make tuiwright trustworthy for external users — stable public API, discoverable
+docs, and a safe upgrade path.
 
 | # | Task | Bead |
 |---|------|------|
-| 1 | Fill `CLAUDE.md` placeholders; README getting-started guide | `tuiwright-0ql.1` |
-| 2 | Add `LICENSE`, `CONTRIBUTING.md`, `CHANGELOG.md` | `tuiwright-0ql.2` |
-| 3 | crates.io metadata + publish `tuiwright-core` then `tuiwright-mcp` | `tuiwright-0ql.3` |
-| 4 | Release automation (tag → GitHub release, consider `cargo-dist`) | `tuiwright-0ql.4` |
+| 1 | Confirm `tuiwright-fixture` publish exclusion | `tuiwright-675.1` |
+| 2 | `[package.metadata.docs.rs]` config in `tuiwright-core/Cargo.toml` | `tuiwright-675.2` |
+| 3 | Public API `///` doc comments for all pub items in `tuiwright-core` | `tuiwright-675.3` |
+| 4 | `cargo semver-checks` job in CI | `tuiwright-675.4` |
+| 5 | First-run error quality pass (`freeze`/`rmux` messages with install hints) | `tuiwright-675.5` |
 
-**Done when:** a new user can `cargo install tuiwright-mcp` and get a working MCP server,
-and a tagged release exists.
+**Done when:** `cargo doc` produces a clean docs.rs-quality page, `semver-checks` runs in
+CI, and missing-dependency errors suggest exact install commands.
