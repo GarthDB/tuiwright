@@ -86,8 +86,8 @@ jobs:
           FREEZE_VER=0.2.2
           ARCH=$(uname -m)
           curl -sSL "https://github.com/charmbracelet/freeze/releases/download/v${FREEZE_VER}/freeze_${FREEZE_VER}_Darwin_${ARCH}.tar.gz" -o /tmp/freeze.tar.gz
-          tar -xzf /tmp/freeze.tar.gz -C /tmp freeze
-          sudo mv /tmp/freeze /usr/local/bin/freeze
+          tar -xzf /tmp/freeze.tar.gz -C /tmp
+          sudo mv "/tmp/freeze_${FREEZE_VER}_Darwin_${ARCH}/freeze" /usr/local/bin/freeze
 
       - name: Build fixture binary
         run: cargo build -p tuiwright-fixture
