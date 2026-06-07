@@ -1,0 +1,13 @@
+[workspace]
+publish = true
+git_tag_enable = true
+git_release_enable = true
+changelog_update = true
+
+# tuiwright-fixture is an internal test app, not published to crates.io
+[[package]]
+name = "tuiwright-fixture"
+publish = false
+git_tag_enable = false
+git_release_enable = false
+changelog_update = false
