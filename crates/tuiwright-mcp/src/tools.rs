@@ -940,8 +940,14 @@ mod tests {
         if tuiwright_core::render::freeze_available().await {
             match result {
                 Ok(out) => {
-                    assert!(out.contains("Hello from"), "Both should include text; got: {out}");
-                    assert!(out.contains(".png"), "Both should include PNG path; got: {out}");
+                    assert!(
+                        out.contains("Hello from"),
+                        "Both should include text; got: {out}"
+                    );
+                    assert!(
+                        out.contains(".png"),
+                        "Both should include PNG path; got: {out}"
+                    );
                 }
                 Err(e) => assert!(
                     e.to_string().contains("freeze exited"),
@@ -954,7 +960,10 @@ mod tests {
                 out.contains("freeze not found"),
                 "Both without freeze should include notice; got: {out}"
             );
-            assert!(out.contains("Hello from"), "fallback should include text; got: {out}");
+            assert!(
+                out.contains("Hello from"),
+                "fallback should include text; got: {out}"
+            );
         }
     }
 }
