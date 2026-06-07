@@ -10,7 +10,7 @@ Thank you for your interest in contributing!
 |------|---------|---------|
 | Rust stable (≥ 1.88) | build | `rustup update stable` |
 | [`freeze`](https://github.com/charmbracelet/freeze) | ANSI → PNG in tests | `brew install charmbracelet/tap/freeze` |
-| [`rmux`](https://github.com/Helvesec/rmux) | live path tests only | `cargo install rmux` |
+| [`rmux`](https://github.com/Helvesec/rmux) | live path tests only | see [Helvesec/rmux releases](https://github.com/Helvesec/rmux/releases) |
 
 **Clone and build**
 
@@ -54,17 +54,6 @@ Any change that adds live-path code must remain behind `#[cfg(feature = "live")]
 1. Add the input struct (with `#[derive(Deserialize, JsonSchema)]`) and handler function in `crates/tuiwright-mcp/src/tools.rs`.
 2. Register the handler in the `list_tools` / `call_tool` match arms.
 3. Add at least one unit test (headless) and document the tool in the README tool reference table.
-
-## Snapshot tests
-
-tuiwright uses [`insta`](https://insta.rs/) with RON serialisation.
-
-```bash
-cargo test                     # run; new/changed snapshots are marked pending
-cargo insta review             # interactively accept or reject
-```
-
-Accepted snapshots live in `tests/snapshots/`; commit them alongside the test change.
 
 ## Code of conduct
 

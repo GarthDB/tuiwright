@@ -28,7 +28,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [0.1.4] — 2026-05-XX  *(M4 — Harden & test)*
+## [0.1.4] — 2026-06-06  *(M4 — Harden & test)*
 
 ### Added
 - Live-path end-to-end integration test (rmux-gated, parallel to `freeze_available()`)
@@ -41,7 +41,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [0.1.3] — 2026-04-XX  *(M3 — Expand tool surface)*
+## [0.1.3] — 2026-06-06  *(M3 — Expand tool surface)*
 
 ### Added
 - `diff` module in `tuiwright-core`: cell-by-cell `SnapshotGrid` comparison
@@ -52,7 +52,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [0.1.2] — 2026-03-XX  *(M2 — Live path + recording)*
+## [0.1.2] — 2026-06-06  *(M2 — Live path + recording)*
 
 ### Added
 - Real `rmux-sdk` 0.5 bindings: `EnsureSession` builder, `PaneCell` API
@@ -62,7 +62,7 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ---
 
-## [0.1.0] — 2026-02-XX  *(M1 — Headless inner loop)*
+## [0.1.0] — 2026-06-06  *(M1 — Headless inner loop)*
 
 ### Added
 - Initial workspace scaffold (`tuiwright-core`, `tuiwright-mcp`, `tuiwright-fixture`)

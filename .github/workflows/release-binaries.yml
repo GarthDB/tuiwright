@@ -14,6 +14,8 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+          - os: macos-13
+            target: x86_64-apple-darwin
           - os: macos-latest
             target: aarch64-apple-darwin
     steps:
@@ -40,7 +42,7 @@ jobs:
           cd ../../..
 
       - name: Upload to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           files: tuiwright-${{ matrix.target }}.tar.gz
         env:
