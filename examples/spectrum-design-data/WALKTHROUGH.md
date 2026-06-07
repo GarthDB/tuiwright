@@ -6,39 +6,40 @@ token explorer for Adobe Spectrum.
 
 ## Prerequisites
 
-1. Build the release binary:
+1. Build the tuiwright MCP server:
    ```bash
    cargo build --release -p tuiwright-mcp
    ```
 
-2. The spectrum-design-data binary must be built:
+2. Build the spectrum-design-data binary (run inside that repo):
    ```bash
-   # In the spectrum-design-data repo:
    cargo build --release -p design-data
    ```
 
-3. `tuiwright.toml` is already configured in `spectrum-design-data/`:
+3. Create `tuiwright.toml` in the spectrum-design-data repo root
+   (replace `/absolute/path/to` with the actual path on your machine):
    ```toml
    [launch]
-   command = ".../design-data"
+   command = "/absolute/path/to/spectrum-design-data/sdk/target/release/design-data"
    args = ["packages/design-data/tokens", "--components", "packages/design-data/components"]
    [size]
    cols = 120
    rows = 40
-   headless_snapshot = ".../design-data packages/design-data/tokens \
-     --components packages/design-data/components --snapshot-ansi --replay {}"
+   headless_snapshot = "/absolute/path/to/spectrum-design-data/sdk/target/release/design-data packages/design-data/tokens --components packages/design-data/components --snapshot-ansi --replay {}"
    ```
 
 ## Headless usage (no live session required)
 
-The `tui_headless` tool replays an NDJSON message stream and returns a snapshot without
-launching a real terminal.
+The `tui_headless` tool runs the app's `headless_snapshot` command with a replay file and returns
+a snapshot without launching a real terminal. It accepts an NDJSON path via the `ndjson` field.
 
 ### Capture the initial browse screen
 
+Pass the empty replay file (zero messages → initial state):
+
 ```
 Tool: tui_headless
-Input: { "replay": [] }
+Input: { "ndjson": "examples/spectrum-design-data/browse.ndjson", "format": "text" }
 ```
 
 Returns plain text showing the initial token browser:
@@ -54,28 +55,33 @@ Returns plain text showing the initial token browser:
 
 ### Query for background-color tokens
 
-Write a replay file and snapshot:
+```
+Tool: tui_headless
+Input: { "ndjson": "examples/spectrum-design-data/query-background-color.ndjson", "format": "text" }
+```
 
+The replay file contains one message:
 ```json
 {"PaletteSubmit":"query property=background-color"}
 ```
 
-```
-Tool: tui_headless
-Input: { "replay": [{"PaletteSubmit":"query property=background-color"}] }
-```
-
 Returns the query result grid showing 19 matched tokens with their UUID, file, and layer columns.
+Column values are truncated to fit the configured terminal width (120 cols).
 
 ### Inspect a component schema
 
 ```
 Tool: tui_headless
-Input: { "replay": [{"PaletteSubmit":"describe button"}] }
+Input: { "ndjson": "examples/spectrum-design-data/describe-button.ndjson", "format": "text" }
+```
+
+The replay file contains:
+```json
+{"PaletteSubmit":"describe button"}
 ```
 
 Returns the Button component schema — options, variants, states — rendered as a scrollable JSON
-pane inside the TUI frame.
+pane inside the TUI frame. Long URLs are truncated to the terminal width.
 
 ## Live session usage
 
@@ -111,17 +117,33 @@ Tool: tui_close
 Input: { "session_id": "sdd-0" }
 ```
 
-## Regression testing with baselines
+## Regression testing with tui_diff
 
-Capture a golden baseline once:
+`tui_diff` compares a headless snapshot against a named baseline (`.snap.json` file stored in
+`baseline_dir`). It reports which cells changed — catching regressions in token count, column
+layout, or color coding. The `baseline` field is a name without extension; the tool appends
+`.snap.json` automatically.
+
+Create a baseline on first run:
 
 ```
-Tool: tui_headless
-Input: { "replay": [{"PaletteSubmit":"query property=background-color"}], "baseline": "examples/spectrum-design-data/query-background-color" }
+Tool: tui_diff
+Input: {
+  "baseline": "query-background-color",
+  "ndjson": "examples/spectrum-design-data/query-background-color.ndjson",
+  "create_if_missing": true
+}
 ```
 
-On subsequent runs, `tui_diff` compares the live snapshot against the baseline and reports
-which cells changed — catching regressions in token count, column layout, or color coding.
+On subsequent runs (without `create_if_missing`), tui_diff returns a diff if anything changed:
+
+```
+Tool: tui_diff
+Input: {
+  "baseline": "query-background-color",
+  "ndjson": "examples/spectrum-design-data/query-background-color.ndjson"
+}
+```
 
 ## Example replay files
 
@@ -134,4 +156,5 @@ The `examples/spectrum-design-data/` directory contains ready-to-use replay scri
 | `describe-button.ndjson` | Button component schema view |
 
 Golden ANSI snapshots (`.ansi`) are stored alongside each replay file and were captured from
-design-data v0.2.0 with 4166 tokens loaded.
+design-data v0.2.0 with 4166 tokens loaded at 120×40. Column values and URLs are truncated to
+fit the terminal width — this is expected and is not a bug in the golden files.
