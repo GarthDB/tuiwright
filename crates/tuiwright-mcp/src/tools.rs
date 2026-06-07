@@ -593,21 +593,23 @@ impl TuiwrightServer {
         &self,
         Parameters(input): Parameters<TuiHeadlessInput>,
     ) -> Result<String, McpError> {
+        if self.config.headless_snapshot.is_none() {
+            return Err(McpError::invalid_params(
+                "headless_snapshot not configured in tuiwright.toml — set it to your app's ANSI snapshot command, e.g. `design-data --replay {} --snapshot-ansi`",
+                None,
+            ));
+        }
+
         let cols = input.cols.unwrap_or(self.config.size.cols);
         let rows = input.rows.unwrap_or(self.config.size.rows);
 
         let output = self
-            .headless_command(&input.ndjson, cols, rows)
-            .map_err(|mut e| {
-                // Improve the error message for the common "not configured" case.
-                if e.message.contains("not configured") {
-                    e.message = "headless_snapshot not configured in tuiwright.toml — set it to your app's ANSI snapshot command, e.g. `design-data --replay {} --snapshot-ansi`".into();
-                }
-                e
-            })?
+            .headless_command(&input.ndjson, cols, rows)?
             .output()
             .await
-            .map_err(|e| McpError::internal_error(format!("failed to spawn headless command: {e}"), None))?;
+            .map_err(|e| {
+                McpError::internal_error(format!("failed to spawn headless command: {e}"), None)
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
