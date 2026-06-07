@@ -263,7 +263,11 @@ mod tests {
     fn no_expected_cursor_is_backcompat() {
         let exp = grid(&["a", "b"], 2, 1); // cursor == None
         let mut act = exp.clone();
-        act.cursor = Some(CursorState { row: 0, col: 1, visible: true });
+        act.cursor = Some(CursorState {
+            row: 0,
+            col: 1,
+            visible: true,
+        });
         let d = diff(&exp, &act);
         assert!(d.is_match(), "should match when expected has no cursor");
         assert!(d.cursor_mismatch.is_none());
@@ -273,7 +277,11 @@ mod tests {
     #[test]
     fn matching_cursors_no_mismatch() {
         let mut exp = grid(&["a", "b"], 2, 1);
-        exp.cursor = Some(CursorState { row: 0, col: 1, visible: true });
+        exp.cursor = Some(CursorState {
+            row: 0,
+            col: 1,
+            visible: true,
+        });
         let act = exp.clone();
         let d = diff(&exp, &act);
         assert!(d.is_match());
@@ -284,9 +292,17 @@ mod tests {
     #[test]
     fn cursor_mismatch_detected() {
         let mut exp = grid(&["a", "b"], 2, 1);
-        exp.cursor = Some(CursorState { row: 0, col: 0, visible: true });
+        exp.cursor = Some(CursorState {
+            row: 0,
+            col: 0,
+            visible: true,
+        });
         let mut act = exp.clone();
-        act.cursor = Some(CursorState { row: 0, col: 1, visible: true });
+        act.cursor = Some(CursorState {
+            row: 0,
+            col: 1,
+            visible: true,
+        });
         let d = diff(&exp, &act);
         assert!(!d.is_match());
         assert!(d.cursor_mismatch.is_some());
@@ -298,7 +314,11 @@ mod tests {
     #[test]
     fn cursor_expected_but_absent_in_actual() {
         let mut exp = grid(&["a", "b"], 2, 1);
-        exp.cursor = Some(CursorState { row: 0, col: 0, visible: true });
+        exp.cursor = Some(CursorState {
+            row: 0,
+            col: 0,
+            visible: true,
+        });
         let act = grid(&["a", "b"], 2, 1); // no cursor
         let d = diff(&exp, &act);
         assert!(!d.is_match());

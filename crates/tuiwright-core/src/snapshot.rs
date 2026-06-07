@@ -22,7 +22,11 @@ pub struct CursorState {
 
 impl Default for CursorState {
     fn default() -> Self {
-        Self { row: 0, col: 0, visible: true }
+        Self {
+            row: 0,
+            col: 0,
+            visible: true,
+        }
     }
 }
 
@@ -45,7 +49,12 @@ pub struct SnapshotGrid {
 impl SnapshotGrid {
     /// Construct a grid with no cursor set (cursor = None).
     pub fn new(cols: u16, rows: u16, cells: Vec<Cell>) -> Self {
-        Self { cols, rows, cells, cursor: None }
+        Self {
+            cols,
+            rows,
+            cells,
+            cursor: None,
+        }
     }
 
     /// Save this grid as a JSON baseline file.

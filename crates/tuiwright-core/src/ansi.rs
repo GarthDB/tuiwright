@@ -191,7 +191,12 @@ pub fn ansi_to_grid(input: &str, cols: u16, rows: u16) -> SnapshotGrid {
         }
     }
 
-    SnapshotGrid { cols, rows, cells, cursor }
+    SnapshotGrid {
+        cols,
+        rows,
+        cells,
+        cursor,
+    }
 }
 
 /// Parse a CUP parameter string `"row;col"` (both 1-based, both optional, default 1)
@@ -316,10 +321,14 @@ mod tests {
                 fg: Some(Color::Ansi(n)),
                 ..Default::default()
             };
-            let grid = SnapshotGrid::new(1, 1, vec![Cell {
-                symbol: "X".to_string(),
-                style,
-            }]);
+            let grid = SnapshotGrid::new(
+                1,
+                1,
+                vec![Cell {
+                    symbol: "X".to_string(),
+                    style,
+                }],
+            );
             let decoded = ansi_to_grid(&grid_to_ansi(&grid), 1, 1);
             assert_eq!(
                 decoded.cells[0].style.fg,
@@ -337,10 +346,14 @@ mod tests {
                 bg: Some(Color::Ansi(n)),
                 ..Default::default()
             };
-            let grid = SnapshotGrid::new(1, 1, vec![Cell {
-                symbol: "X".to_string(),
-                style,
-            }]);
+            let grid = SnapshotGrid::new(
+                1,
+                1,
+                vec![Cell {
+                    symbol: "X".to_string(),
+                    style,
+                }],
+            );
             let decoded = ansi_to_grid(&grid_to_ansi(&grid), 1, 1);
             assert_eq!(
                 decoded.cells[0].style.bg,
@@ -425,10 +438,18 @@ mod tests {
         use crate::snapshot::CursorState;
         let cells = vec![Cell::default(); 4];
         let mut grid = SnapshotGrid::new(2, 2, cells);
-        grid.cursor = Some(CursorState { row: 1, col: 1, visible: true });
+        grid.cursor = Some(CursorState {
+            row: 1,
+            col: 1,
+            visible: true,
+        });
         let ansi = grid_to_ansi(&grid);
         // The CUP escape should be present (1-based → "2;2").
-        assert!(ansi.contains("\x1b[2;2H"), "expected CUP in output: {:?}", ansi);
+        assert!(
+            ansi.contains("\x1b[2;2H"),
+            "expected CUP in output: {:?}",
+            ansi
+        );
         let decoded = ansi_to_grid(&ansi, 2, 2);
         let c = decoded.cursor.expect("cursor should be decoded");
         assert_eq!(c.row, 1);

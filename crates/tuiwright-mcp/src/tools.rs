@@ -752,9 +752,8 @@ impl TuiwrightServer {
         }
 
         if failures.is_empty() {
-            let checks = input.contains.len()
-                + input.not_contains.len()
-                + if wants_cursor { 1 } else { 0 };
+            let checks =
+                input.contains.len() + input.not_contains.len() + if wants_cursor { 1 } else { 0 };
             Ok(format!("✓ all {checks} assertion(s) passed"))
         } else {
             Err(McpError::invalid_request(
@@ -823,11 +822,16 @@ async fn render_snapshot(
         }
         SnapshotFormat::Both => {
             if !tuiwright_core::render::freeze_available().await {
-                return Ok(format!("freeze not found — text only:\n```\n{text}```\n{cursor}"));
+                return Ok(format!(
+                    "freeze not found — text only:\n```\n{text}```\n{cursor}"
+                ));
             }
             let png = tmp_png_path();
             tuiwright_core::render::grid_to_png(grid, &png).await?;
-            Ok(format!("PNG: {}\n\n```\n{text}```\n{cursor}", png.display()))
+            Ok(format!(
+                "PNG: {}\n\n```\n{text}```\n{cursor}",
+                png.display()
+            ))
         }
     }
 }
