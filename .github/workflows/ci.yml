@@ -51,10 +51,13 @@ jobs:
       - name: test
         run: cargo test --no-default-features
 
-  # ── Required gate 4: live feature compiles ───────────────────────────────
+  # ── Required gate 4: live feature builds and tests on Linux + macOS ────────
   build-live:
-    name: Build (live feature)
-    runs-on: ubuntu-latest
+    name: Build (live feature) / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
 
@@ -70,8 +73,22 @@ jobs:
             target
           key: ${{ runner.os }}-cargo-live-${{ hashFiles('**/Cargo.toml') }}
 
+      - name: Install freeze (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          FREEZE_VER=0.2.2
+          curl -sSL "https://github.com/charmbracelet/freeze/releases/download/v${FREEZE_VER}/freeze_${FREEZE_VER}_amd64.deb" -o /tmp/freeze.deb
+          sudo dpkg -i /tmp/freeze.deb
+
+      - name: Install freeze (macOS)
+        if: runner.os == 'macOS'
+        run: brew install charmbracelet/tap/freeze
+
       - name: build with live feature
         run: cargo build --features live
+
+      - name: test with live feature
+        run: cargo test --features live
 
   # ── Required gate 2: minimum supported Rust version ──────────────────────
   msrv:

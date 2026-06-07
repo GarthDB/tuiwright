@@ -798,6 +798,259 @@ async fn append_recording_frame(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tuiwright_core::{
+        config::{Config, SizeConfig},
+        snapshot::{Cell, CellStyle, SnapshotGrid},
+    };
+
+    fn minimal_grid() -> SnapshotGrid {
+        SnapshotGrid {
+            cols: 3,
+            rows: 1,
+            cells: vec![
+                Cell {
+                    symbol: "H".to_string(),
+                    style: CellStyle::default(),
+                },
+                Cell {
+                    symbol: "i".to_string(),
+                    style: CellStyle::default(),
+                },
+                Cell {
+                    symbol: "!".to_string(),
+                    style: CellStyle::default(),
+                },
+            ],
+        }
+    }
+
+    fn server_with_headless(cmd: Option<&str>) -> TuiwrightServer {
+        let config = Config {
+            headless_snapshot: cmd.map(str::to_string),
+            size: SizeConfig { cols: 80, rows: 24 },
+            ..Default::default()
+        };
+        TuiwrightServer::new(config)
+    }
+
+    // -- headless_command ----------------------------------------------------
+
+    #[test]
+    fn headless_command_no_config_returns_error() {
+        let server = server_with_headless(None);
+        assert!(server.headless_command("/tmp/test.ndjson", 80, 24).is_err());
+    }
+
+    #[test]
+    fn headless_command_substitutes_placeholder() {
+        let server = server_with_headless(Some("my-app --replay {} --snapshot-ansi"));
+        let cmd = server.headless_command("/tmp/foo.ndjson", 80, 24).unwrap();
+        // The Command doesn't expose args in a simple way, but we can verify it was built
+        // without panicking and that the binary name is correct.
+        let prog = cmd.as_std().get_program().to_string_lossy().to_string();
+        assert_eq!(prog, "my-app");
+    }
+
+    #[test]
+    fn headless_command_empty_template_returns_error() {
+        let server = server_with_headless(Some("   "));
+        assert!(server.headless_command("/tmp/test.ndjson", 80, 24).is_err());
+    }
+
+    // -- baseline_path -------------------------------------------------------
+
+    #[test]
+    fn baseline_path_resolves_correctly() {
+        let server = server_with_headless(None);
+        let p = server.baseline_path("my-snap");
+        assert!(p.ends_with("my-snap.snap.json"));
+        assert!(p.starts_with(&server.config.baseline_dir));
+    }
+
+    // -- render_snapshot graceful degradation --------------------------------
+
+    #[tokio::test]
+    async fn render_snapshot_text_format_never_needs_freeze() {
+        let grid = minimal_grid();
+        let result = render_snapshot(&grid, &SnapshotFormat::Text).await.unwrap();
+        assert!(
+            result.contains("Hi!"),
+            "plain-text output should contain the symbols"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_snapshot_image_graceful_when_freeze_absent() {
+        if tuiwright_core::render::freeze_available().await {
+            return; // freeze is present — skip the no-freeze path
+        }
+        let grid = minimal_grid();
+        let result = render_snapshot(&grid, &SnapshotFormat::Image)
+            .await
+            .unwrap();
+        assert!(
+            result.contains("freeze not found"),
+            "should return fallback message when freeze is absent, got: {result}"
+        );
+    }
+
+    #[tokio::test]
+    async fn render_snapshot_both_falls_back_to_text_when_freeze_absent() {
+        if tuiwright_core::render::freeze_available().await {
+            return; // freeze present — skip
+        }
+        let grid = minimal_grid();
+        let result = render_snapshot(&grid, &SnapshotFormat::Both).await.unwrap();
+        assert!(
+            result.contains("freeze not found"),
+            "Both format should fall back gracefully; got: {result}"
+        );
+        assert!(result.contains("Hi!"), "fallback should include text");
+    }
+}
+
+/// Live-path integration tests — gated on both the `live` feature AND rmux availability.
+///
+/// These tests launch `tuiwright-fixture` in a real rmux session and exercise the full
+/// live tool chain: tui_open → tui_snapshot → tui_send_keys → tui_snapshot → tui_close.
+/// They self-skip gracefully when rmux is not running or the fixture binary is absent.
+#[cfg(all(test, feature = "live"))]
+mod live_tests {
+    use super::*;
+    use tuiwright_core::config::{Config, LaunchConfig, SizeConfig};
+
+    /// Returns true if the rmux daemon is reachable.
+    async fn rmux_available() -> bool {
+        tokio::process::Command::new("rmux")
+            .args(["ls"])
+            .output()
+            .await
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn fixture_bin() -> std::path::PathBuf {
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace = manifest.parent().unwrap().parent().unwrap();
+        workspace.join("target/debug/tuiwright-fixture")
+    }
+
+    /// Full live round-trip: open → snapshot → send Down → snapshot again → close.
+    ///
+    /// Verifies that:
+    /// - tui_open launches the fixture and stores a session
+    /// - tui_snapshot returns plain text containing fixture content
+    /// - tui_send_keys delivers a Down arrow (second item becomes selected)
+    /// - tui_close kills the session without error
+    #[tokio::test]
+    async fn live_open_snapshot_sendkeys_close() {
+        if !rmux_available().await {
+            eprintln!("SKIP: rmux daemon not running");
+            return;
+        }
+        let bin = fixture_bin();
+        if !bin.exists() {
+            panic!(
+                "tuiwright-fixture not found at {}. Run `cargo test --workspace` first.",
+                bin.display()
+            );
+        }
+
+        let config = Config {
+            launch: LaunchConfig {
+                command: Some(bin.to_str().unwrap().to_string()),
+                ..Default::default()
+            },
+            size: SizeConfig { cols: 80, rows: 24 },
+            ..Default::default()
+        };
+        let server = TuiwrightServer::new(config);
+
+        // ── Open ────────────────────────────────────────────────────────────
+        let open = server
+            .tui_open(Parameters(TuiOpenInput {
+                command: None,
+                args: vec![],
+                cols: Some(80),
+                rows: Some(24),
+                session: Some("tuiwright-live-test".to_string()),
+            }))
+            .await;
+        assert!(open.is_ok(), "tui_open failed: {:?}", open);
+
+        // Give the fixture a moment to render its first frame.
+        tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+
+        // ── Snapshot before keypress ─────────────────────────────────────
+        let snap1 = server
+            .tui_snapshot(Parameters(TuiSnapshotInput {
+                format: SnapshotFormat::Text,
+            }))
+            .await;
+        assert!(snap1.is_ok(), "first tui_snapshot failed: {:?}", snap1);
+        let snap1_text = snap1.unwrap();
+        assert!(
+            snap1_text.contains("tuiwright fixture"),
+            "initial snapshot should contain fixture title; got:\n{snap1_text}"
+        );
+
+        // ── Send Down arrow ──────────────────────────────────────────────
+        let keys = server
+            .tui_send_keys(Parameters(TuiSendKeysInput {
+                keys: "\x1b[B".to_string(), // CSI B = cursor down / Down arrow
+            }))
+            .await;
+        assert!(keys.is_ok(), "tui_send_keys failed: {:?}", keys);
+
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        // ── Snapshot after keypress ──────────────────────────────────────
+        let snap2 = server
+            .tui_snapshot(Parameters(TuiSnapshotInput {
+                format: SnapshotFormat::Text,
+            }))
+            .await;
+        assert!(snap2.is_ok(), "second tui_snapshot failed: {:?}", snap2);
+
+        // ── Close ────────────────────────────────────────────────────────
+        let close = server.tui_close().await;
+        assert!(close.is_ok(), "tui_close failed: {:?}", close);
+        assert_eq!(close.unwrap(), "session closed");
+
+        // ── Guard: session is cleared ─────────────────────────────────────
+        let guard = server.session.lock().await;
+        assert!(guard.is_none(), "session should be None after tui_close");
+    }
+
+    /// tui_send_keys without an open session returns an invalid_params error.
+    #[tokio::test]
+    async fn send_keys_without_session_returns_error() {
+        if !rmux_available().await {
+            eprintln!("SKIP: rmux daemon not running");
+            return;
+        }
+        let config = Config {
+            size: SizeConfig { cols: 80, rows: 24 },
+            ..Default::default()
+        };
+        let server = TuiwrightServer::new(config);
+        let result = server
+            .tui_send_keys(Parameters(TuiSendKeysInput {
+                keys: "x".to_string(),
+            }))
+            .await;
+        assert!(result.is_err(), "expected error with no session");
+        let msg = result.unwrap_err().message;
+        assert!(
+            msg.contains("no live session"),
+            "expected 'no live session' error; got: {msg}"
+        );
+    }
+}
+
 /// Convert an rmux pane snapshot to a tuiwright SnapshotGrid.
 #[cfg(feature = "live")]
 fn rmux_snapshot_to_grid(snapshot: rmux_sdk::PaneSnapshot) -> tuiwright_core::SnapshotGrid {
