@@ -820,24 +820,26 @@ mod tests {
     };
 
     fn minimal_grid() -> SnapshotGrid {
-        SnapshotGrid {
-            cols: 3,
-            rows: 1,
-            cells: vec![
-                Cell {
-                    symbol: "H".to_string(),
-                    style: CellStyle::default(),
+        // Use a realistic terminal size so freeze can render it without crashing.
+        // freeze 0.2.2 SIGSEGV on very small grids (e.g. 3×1).
+        let cols: u16 = 80;
+        let rows: u16 = 5;
+        let content = b"Hello from tuiwright test grid";
+        let mut cells: Vec<Cell> = (0..cols as usize * rows as usize)
+            .map(|i| Cell {
+                symbol: if i < content.len() {
+                    (content[i] as char).to_string()
+                } else {
+                    " ".to_string()
                 },
-                Cell {
-                    symbol: "i".to_string(),
-                    style: CellStyle::default(),
-                },
-                Cell {
-                    symbol: "!".to_string(),
-                    style: CellStyle::default(),
-                },
-            ],
+                style: CellStyle::default(),
+            })
+            .collect();
+        // Make row 0 bold so there's styled content for freeze to render.
+        for cell in cells[..cols as usize].iter_mut() {
+            cell.style.bold = true;
         }
+        SnapshotGrid { cols, rows, cells }
     }
 
     fn server_with_headless(cmd: Option<&str>) -> TuiwrightServer {
@@ -903,7 +905,7 @@ mod tests {
         let grid = minimal_grid();
         let result = render_snapshot(&grid, &SnapshotFormat::Text).await.unwrap();
         assert!(
-            result.contains("Hi!"),
+            result.contains("Hello from"),
             "plain-text output should contain the symbols"
         );
     }
@@ -933,7 +935,7 @@ mod tests {
         let result = render_snapshot(&grid, &SnapshotFormat::Both).await.unwrap();
         if tuiwright_core::render::freeze_available().await {
             assert!(
-                result.contains("Hi!"),
+                result.contains("Hello from"),
                 "Both format should include text; got: {result}"
             );
             assert!(
@@ -946,7 +948,7 @@ mod tests {
                 "Both format without freeze should include notice; got: {result}"
             );
             assert!(
-                result.contains("Hi!"),
+                result.contains("Hello from"),
                 "fallback should include text; got: {result}"
             );
         }
