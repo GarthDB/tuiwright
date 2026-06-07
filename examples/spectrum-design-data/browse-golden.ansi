@@ -1,0 +1,24 @@
+[0m[0;32m▶ [0m 4166 tokens  ·  packages/design-data/tokens                                  [0m
+[0m[0m  [0;1mSpectrum Design Data[0;90m  v0.2.0[0m                                                  [0m
+[0m[0m  [0;90m: commands · / search · ? help · q quit[0m                                       [0m
+[0m[0m                                                                                [0m
+[0m[0m  >                                                                             [0m
+[0m[0m                                                                                [0m
+[0m[0m  [0;1;33m:query <expr>[0m             [0;90mFilter tokens  e.g. background-color/*[0m              [0m
+[0m[0m  [0;1;33m:resolve property=<name>[0m  [0;90mResolve a property through the cascade[0m              [0m
+[0m[0m  [0;1;33m:describe <component>[0m     [0;90mInspect a component schema[0m                          [0m
+[0m[0m  [0;1;33m:validate[0m                 [0;90mValidate all tokens against schemas[0m                 [0m
+[0m[0m  [0;1;33m:new [<intent>][0m           [0;90mOpen the token authoring wizard[0m                     [0m
+[0m[0m  [0;1;33m:name [<intent>][0m          [0;90mOpen the token naming wizard[0m                        [0m
+[0m[0m  [0;1;33m:find[0m                     [0;90mOpen fuzzy find[0m                                     [0m
+[0m[0m  [0;1;33m?[0m                         [0;90mToggle help[0m                                         [0m
+[0m[0m  [0;1;33mq[0m                         [0;90mQuit[0m                                                [0m
+[0m[0m                                                                                [0m
+[0m[0m                                                                                [0m
+[0m[0m                                                                                [0m
+[0m[0m                                                                                [0m
+[0m[0m                                                                                [0m
+[0m[0m                                                                                [0m
+[0m[0m                                                                                [0m
+[0m[0m                                                                                [0m
+[0m[0m                                                                                [0m

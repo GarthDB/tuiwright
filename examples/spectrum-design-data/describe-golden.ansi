@@ -1,0 +1,24 @@
+[0m[0;32m▶ [0m 4166 tokens  ·  packages/design-data/tokens                                  [0m
+[0m[0m┌ Describe: button ────────────────────────────────────────────────────────────┐[0m
+[0m[0m│{                                                                             │[0m
+[0m[0m│  "$schema": "https://opensource.adobe.com/spectrum-design-data/schemas/v0/com│[0m
+[0m[0m│  "$id": "https://opensource.adobe.com/spectrum-design-data/schemas/v0/compone│[0m
+[0m[0m│  "specVersion": "1.0.0-draft",                                               │[0m
+[0m[0m│  "name": "button",                                                           │[0m
+[0m[0m│  "displayName": "Button",                                                    │[0m
+[0m[0m│  "description": "Buttons allow users to perform an action or to navigate to a│[0m
+[0m[0m│  "meta": {                                                                   │[0m
+[0m[0m│    "category": "actions",                                                    │[0m
+[0m[0m│    "documentationUrl": "https://spectrum.adobe.com/page/button/"             │[0m
+[0m[0m│  },                                                                          │[0m
+[0m[0m│  "options": {                                                                │[0m
+[0m[0m│    "variant": {                                                              │[0m
+[0m[0m│      "type": "string",                                                       │[0m
+[0m[0m│      "default": "accent",                                                    │[0m
+[0m[0m│      "description": "Visual emphasis level.",                                │[0m
+[0m[0m│      "values": [                                                             │[0m
+[0m[0m│        {                                                                     │[0m
+[0m[0m│          "value": "accent"                                                   │[0m
+[0m[0m│        },                                                                    │[0m
+[0m[0m└──────────────────────────────────────────────────────────────────────────────┘[0m
+[0m[0m                                                                                [0m
