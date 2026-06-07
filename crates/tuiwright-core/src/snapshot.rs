@@ -8,6 +8,24 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+/// Cursor position and visibility captured from a terminal pane.
+///
+/// `row` and `col` are zero-based. `visible` reflects whether the cursor is
+/// currently shown (hidden via `\x1b[?25l`, etc.). `style` is the raw cursor
+/// shape integer from the terminal (0 = default block).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CursorState {
+    pub row: u16,
+    pub col: u16,
+    pub visible: bool,
+}
+
+impl Default for CursorState {
+    fn default() -> Self {
+        Self { row: 0, col: 0, visible: true }
+    }
+}
+
 /// A full snapshot of a terminal pane at a point in time.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SnapshotGrid {
@@ -15,9 +33,21 @@ pub struct SnapshotGrid {
     pub rows: u16,
     /// Row-major, length == cols * rows.
     pub cells: Vec<Cell>,
+    /// Terminal cursor position and visibility, if captured.
+    ///
+    /// `None` is the default — existing baselines (`.snap.json`) that predate
+    /// cursor support will deserialize to `None` and **never fail a diff**,
+    /// preserving back-compat.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<CursorState>,
 }
 
 impl SnapshotGrid {
+    /// Construct a grid with no cursor set (cursor = None).
+    pub fn new(cols: u16, rows: u16, cells: Vec<Cell>) -> Self {
+        Self { cols, rows, cells, cursor: None }
+    }
+
     /// Save this grid as a JSON baseline file.
     pub fn save_baseline(&self, path: &Path) -> anyhow::Result<()> {
         if let Some(parent) = path.parent() {
