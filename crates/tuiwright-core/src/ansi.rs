@@ -3,7 +3,7 @@
 //! `grid_to_ansi` encodes a grid → ANSI for piping to `freeze` (→ PNG).
 //! `ansi_to_grid` decodes ANSI SGR output → a styled grid for inspection.
 
-use crate::snapshot::{Cell, CellStyle, Color, SnapshotGrid};
+use crate::snapshot::{Cell, CellStyle, Color, CursorState, SnapshotGrid};
 
 /// Render a [`SnapshotGrid`] as a string containing ANSI SGR escape sequences.
 ///
@@ -31,6 +31,12 @@ pub fn grid_to_ansi(grid: &SnapshotGrid) -> String {
         }
         // Reset at end of row, then newline.
         out.push_str("\x1b[0m\n");
+    }
+
+    // If the grid carries cursor state, append a CUP escape (1-based row;col).
+    // The ansi_to_grid decoder recognises this and restores the cursor field.
+    if let Some(c) = grid.cursor {
+        out.push_str(&format!("\x1b[{};{}H", c.row + 1, c.col + 1));
     }
 
     out
@@ -107,11 +113,16 @@ fn color_bg_code(c: &Color) -> String {
 /// Parse an ANSI SGR-escaped string into a [`SnapshotGrid`].
 ///
 /// The input is expected to be in the format produced by [`grid_to_ansi`]:
-/// each row ends with `\n`, cells carry SGR codes that encode style, and CSI
-/// sequences other than SGR (`m`) are ignored.
+/// each row ends with `\n`, cells carry SGR codes that encode style.  CSI
+/// sequences are handled as follows:
+/// - `m` (SGR): applied to the current style.
+/// - `H` / `f` (CUP — cursor position): parsed and stored in `grid.cursor`.
+///   ANSI uses **1-based** row;col; missing params default to 1. The resulting
+///   `CursorState` has `visible = true`.
+/// - All other CSI sequences: silently skipped.
 ///
-/// The decoder is faithful to the encoder: every style emitted by `grid_to_ansi`
-/// round-trips exactly back to the original `CellStyle`.
+/// `cur_row`/`cur_col` below track where the next *cell character* is placed
+/// and are independent of the cursor position captured from CUP.
 pub fn ansi_to_grid(input: &str, cols: u16, rows: u16) -> SnapshotGrid {
     let col_usize = cols as usize;
     let row_usize = rows as usize;
@@ -119,15 +130,12 @@ pub fn ansi_to_grid(input: &str, cols: u16, rows: u16) -> SnapshotGrid {
     let mut cur_style = CellStyle::default();
     let mut cur_row = 0usize;
     let mut cur_col = 0usize;
+    let mut cursor: Option<CursorState> = None;
 
     let bytes = input.as_bytes();
     let mut i = 0;
 
     while i < bytes.len() {
-        if cur_row >= row_usize {
-            break;
-        }
-
         if bytes[i] == b'\x1b' && i + 1 < bytes.len() && bytes[i + 1] == b'[' {
             // CSI sequence: ESC [ <params> <final_byte>
             i += 2; // skip ESC [
@@ -138,8 +146,14 @@ pub fn ansi_to_grid(input: &str, cols: u16, rows: u16) -> SnapshotGrid {
             }
             let final_byte = bytes.get(i).copied().unwrap_or(b'm');
             let params_str = std::str::from_utf8(&bytes[param_start..i]).unwrap_or("");
-            if final_byte == b'm' {
-                apply_sgr(params_str, &mut cur_style);
+            match final_byte {
+                b'm' => apply_sgr(params_str, &mut cur_style),
+                // CUP (cursor position) — H and f are synonyms.
+                // Params are "row;col" 1-based; missing parts default to 1.
+                b'H' | b'f' => {
+                    cursor = Some(parse_cup(params_str));
+                }
+                _ => {}
             }
             // Skip the final byte.
             if i < bytes.len() {
@@ -147,6 +161,9 @@ pub fn ansi_to_grid(input: &str, cols: u16, rows: u16) -> SnapshotGrid {
             }
         } else if bytes[i] == b'\n' {
             // End of row — advance to next row.
+            if cur_row >= row_usize {
+                break;
+            }
             cur_row += 1;
             cur_col = 0;
             cur_style = CellStyle::default(); // encoder resets at row start/end
@@ -154,6 +171,9 @@ pub fn ansi_to_grid(input: &str, cols: u16, rows: u16) -> SnapshotGrid {
         } else if bytes[i] == b'\r' {
             i += 1;
         } else {
+            if cur_row >= row_usize {
+                break;
+            }
             // UTF-8 character: consume all continuation bytes.
             let ch_start = i;
             i += 1;
@@ -171,7 +191,25 @@ pub fn ansi_to_grid(input: &str, cols: u16, rows: u16) -> SnapshotGrid {
         }
     }
 
-    SnapshotGrid { cols, rows, cells }
+    SnapshotGrid {
+        cols,
+        rows,
+        cells,
+        cursor,
+    }
+}
+
+/// Parse a CUP parameter string `"row;col"` (both 1-based, both optional, default 1)
+/// into a zero-based [`CursorState`].
+fn parse_cup(params: &str) -> CursorState {
+    let mut parts = params.splitn(2, ';');
+    let row1: u16 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+    let col1: u16 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(1);
+    CursorState {
+        row: row1.saturating_sub(1),
+        col: col1.saturating_sub(1),
+        visible: true,
+    }
 }
 
 /// Apply a semicolon-delimited list of SGR parameters to `style`.
@@ -254,11 +292,7 @@ mod tests {
                 style: Default::default(),
             })
             .collect();
-        let grid = SnapshotGrid {
-            cols: 5,
-            rows: 1,
-            cells,
-        };
+        let grid = SnapshotGrid::new(5, 1, cells);
         let ansi = grid_to_ansi(&grid);
         // Strip all escape sequences, should get "hello".
         let plain: String = ansi
@@ -287,14 +321,14 @@ mod tests {
                 fg: Some(Color::Ansi(n)),
                 ..Default::default()
             };
-            let grid = SnapshotGrid {
-                cols: 1,
-                rows: 1,
-                cells: vec![Cell {
+            let grid = SnapshotGrid::new(
+                1,
+                1,
+                vec![Cell {
                     symbol: "X".to_string(),
                     style,
                 }],
-            };
+            );
             let decoded = ansi_to_grid(&grid_to_ansi(&grid), 1, 1);
             assert_eq!(
                 decoded.cells[0].style.fg,
@@ -312,14 +346,14 @@ mod tests {
                 bg: Some(Color::Ansi(n)),
                 ..Default::default()
             };
-            let grid = SnapshotGrid {
-                cols: 1,
-                rows: 1,
-                cells: vec![Cell {
+            let grid = SnapshotGrid::new(
+                1,
+                1,
+                vec![Cell {
                     symbol: "X".to_string(),
                     style,
                 }],
-            };
+            );
             let decoded = ansi_to_grid(&grid_to_ansi(&grid), 1, 1);
             assert_eq!(
                 decoded.cells[0].style.bg,
@@ -350,11 +384,7 @@ mod tests {
                 style: Default::default(),
             },
         ];
-        let grid = SnapshotGrid {
-            cols: 2,
-            rows: 1,
-            cells,
-        };
+        let grid = SnapshotGrid::new(2, 1, cells);
         let decoded = ansi_to_grid(&grid_to_ansi(&grid), 2, 1);
         assert_eq!(decoded.cells[0].symbol, emoji);
         assert_eq!(decoded.cells[1].symbol, cjk);
@@ -379,22 +409,80 @@ mod tests {
         assert_eq!(decoded.cells[0].symbol, "A");
     }
 
-    /// CSI H (cursor home) is silently skipped; content placed at the current column.
+    /// CSI H (CUP — cursor home) is now captured, not skipped.
+    /// Cell content before/after the CUP still lands at the sequential grid positions.
     #[test]
-    fn cursor_home_csi_skipped() {
+    fn cursor_home_csi_captured() {
+        // ESC[H with no params means row=1,col=1 (ANSI 1-based) → (row=0,col=0) zero-based.
         let input = "A\x1b[HB\n";
         let decoded = ansi_to_grid(input, 2, 1);
         assert_eq!(decoded.cells[0].symbol, "A");
         assert_eq!(decoded.cells[1].symbol, "B");
+        let cursor = decoded.cursor.expect("CUP should set cursor");
+        assert_eq!(cursor.row, 0);
+        assert_eq!(cursor.col, 0);
     }
 
-    /// CSI 2C (cursor forward) is silently skipped; next char placed at the current column.
+    /// CSI 2C (cursor forward) is still silently skipped; next char placed at the current column.
     #[test]
     fn cursor_forward_csi_skipped() {
         let input = "A\x1b[2CB\n";
         let decoded = ansi_to_grid(input, 2, 1);
         assert_eq!(decoded.cells[0].symbol, "A");
         assert_eq!(decoded.cells[1].symbol, "B");
+    }
+
+    /// CUP at an arbitrary position round-trips through grid_to_ansi → ansi_to_grid.
+    #[test]
+    fn cursor_cup_roundtrip() {
+        use crate::snapshot::CursorState;
+        let cells = vec![Cell::default(); 4];
+        let mut grid = SnapshotGrid::new(2, 2, cells);
+        grid.cursor = Some(CursorState {
+            row: 1,
+            col: 1,
+            visible: true,
+        });
+        let ansi = grid_to_ansi(&grid);
+        // The CUP escape should be present (1-based → "2;2").
+        assert!(
+            ansi.contains("\x1b[2;2H"),
+            "expected CUP in output: {:?}",
+            ansi
+        );
+        let decoded = ansi_to_grid(&ansi, 2, 2);
+        let c = decoded.cursor.expect("cursor should be decoded");
+        assert_eq!(c.row, 1);
+        assert_eq!(c.col, 1);
+        assert!(c.visible);
+    }
+
+    /// CUP with missing params defaults to (0, 0) (ANSI 1-based 1,1 → 0,0 zero-based).
+    #[test]
+    fn cursor_cup_defaults_to_home() {
+        let input = "\x1b[H";
+        let decoded = ansi_to_grid(input, 1, 1);
+        let c = decoded.cursor.expect("ESC[H should produce a cursor");
+        assert_eq!(c.row, 0);
+        assert_eq!(c.col, 0);
+    }
+
+    /// CUP with only-row param leaves col at 0.
+    #[test]
+    fn cursor_cup_row_only() {
+        let input = "\x1b[3H";
+        let decoded = ansi_to_grid(input, 1, 4);
+        let c = decoded.cursor.expect("ESC[3H should produce a cursor");
+        assert_eq!(c.row, 2); // 3 → 0-based 2
+        assert_eq!(c.col, 0); // missing col defaults to 1 → 0
+    }
+
+    /// No CUP in input → cursor field is None.
+    #[test]
+    fn no_cup_means_no_cursor() {
+        let input = "AB\n";
+        let decoded = ansi_to_grid(input, 2, 1);
+        assert!(decoded.cursor.is_none());
     }
 
     /// Round-trip: grid_to_ansi → ansi_to_grid must reproduce symbols and styles.
@@ -444,11 +532,7 @@ mod tests {
             })
             .collect();
 
-        let grid = SnapshotGrid {
-            cols: 4,
-            rows: 1,
-            cells: cells.clone(),
-        };
+        let grid = SnapshotGrid::new(4, 1, cells.clone());
 
         let ansi = grid_to_ansi(&grid);
         let decoded = ansi_to_grid(&ansi, 4, 1);

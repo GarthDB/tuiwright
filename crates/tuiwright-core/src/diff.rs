@@ -4,7 +4,7 @@
 //! [`GridDiff`] describing which cells changed.  [`GridDiff::display`]
 //! renders a human-readable summary suitable for MCP tool output.
 
-use crate::snapshot::{Cell, CellStyle, Color, SnapshotGrid};
+use crate::snapshot::{Cell, CellStyle, Color, CursorState, SnapshotGrid};
 use serde::{Deserialize, Serialize};
 
 /// A single cell that differs between baseline and actual.
@@ -24,12 +24,18 @@ pub struct GridDiff {
     /// True when the grids have different dimensions (implies all cells differ).
     pub size_mismatch: bool,
     pub changed_cells: Vec<CellDiff>,
+    /// Set when the expected grid had a cursor and it differed from actual.
+    ///
+    /// `None` means either no cursor was expected (back-compat) or they matched.
+    /// When present, holds `(expected_cursor, actual_cursor)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_mismatch: Option<(Option<CursorState>, Option<CursorState>)>,
 }
 
 impl GridDiff {
-    /// Returns true when there are no differences.
+    /// Returns true when there are no differences (cells, size, or cursor).
     pub fn is_match(&self) -> bool {
-        !self.size_mismatch && self.changed_cells.is_empty()
+        !self.size_mismatch && self.changed_cells.is_empty() && self.cursor_mismatch.is_none()
     }
 
     /// Human-readable summary for MCP tool output.
@@ -48,11 +54,9 @@ impl GridDiff {
         }
 
         let total = self.changed_cells.len();
-        if total == 0 {
-            return out;
+        if total > 0 {
+            out.push_str(&format!("{total} cell(s) differ:\n"));
         }
-
-        out.push_str(&format!("{total} cell(s) differ:\n"));
 
         // Show up to 20 changed cells in detail.
         for cd in self.changed_cells.iter().take(20) {
@@ -76,11 +80,26 @@ impl GridDiff {
             out.push_str(&format!("  … and {} more\n", total - 20));
         }
 
+        if let Some((exp_c, act_c)) = &self.cursor_mismatch {
+            let fmt = |c: &Option<CursorState>| match c {
+                Some(cs) => format!("row={} col={} visible={}", cs.row, cs.col, cs.visible),
+                None => "<none>".to_string(),
+            };
+            out.push_str(&format!(
+                "cursor mismatch: expected {} → actual {}\n",
+                fmt(exp_c),
+                fmt(act_c)
+            ));
+        }
+
         out
     }
 }
 
 /// Compare `expected` (baseline) against `actual`.
+///
+/// Cursor comparison is opt-in: if `expected.cursor` is `None` (the case for
+/// all old baselines), cursors are never compared so back-compat is preserved.
 pub fn diff(expected: &SnapshotGrid, actual: &SnapshotGrid) -> GridDiff {
     let size_mismatch = expected.cols != actual.cols || expected.rows != actual.rows;
 
@@ -90,6 +109,7 @@ pub fn diff(expected: &SnapshotGrid, actual: &SnapshotGrid) -> GridDiff {
             actual_size: (actual.cols, actual.rows),
             size_mismatch: true,
             changed_cells: vec![],
+            cursor_mismatch: None,
         };
     }
 
@@ -113,11 +133,23 @@ pub fn diff(expected: &SnapshotGrid, actual: &SnapshotGrid) -> GridDiff {
         }
     }
 
+    // Only compare cursors when the expected baseline has one set.
+    let cursor_mismatch = if let Some(exp_c) = expected.cursor {
+        if actual.cursor != Some(exp_c) {
+            Some((Some(exp_c), actual.cursor))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     GridDiff {
         expected_size: (expected.cols, expected.rows),
         actual_size: (actual.cols, actual.rows),
         size_mismatch: false,
         changed_cells,
+        cursor_mismatch,
     }
 }
 
@@ -194,7 +226,7 @@ mod tests {
                 style: CellStyle::default(),
             })
             .collect();
-        SnapshotGrid { cols, rows, cells }
+        SnapshotGrid::new(cols, rows, cells)
     }
 
     #[test]
@@ -224,5 +256,72 @@ mod tests {
         let d = diff(&exp, &act);
         assert!(d.size_mismatch);
         assert!(!d.is_match());
+    }
+
+    /// When expected has no cursor (back-compat), cursor differences are ignored.
+    #[test]
+    fn no_expected_cursor_is_backcompat() {
+        let exp = grid(&["a", "b"], 2, 1); // cursor == None
+        let mut act = exp.clone();
+        act.cursor = Some(CursorState {
+            row: 0,
+            col: 1,
+            visible: true,
+        });
+        let d = diff(&exp, &act);
+        assert!(d.is_match(), "should match when expected has no cursor");
+        assert!(d.cursor_mismatch.is_none());
+    }
+
+    /// When expected has a cursor and actual matches, no mismatch is reported.
+    #[test]
+    fn matching_cursors_no_mismatch() {
+        let mut exp = grid(&["a", "b"], 2, 1);
+        exp.cursor = Some(CursorState {
+            row: 0,
+            col: 1,
+            visible: true,
+        });
+        let act = exp.clone();
+        let d = diff(&exp, &act);
+        assert!(d.is_match());
+        assert!(d.cursor_mismatch.is_none());
+    }
+
+    /// When expected has a cursor and actual has a different one, mismatch is reported.
+    #[test]
+    fn cursor_mismatch_detected() {
+        let mut exp = grid(&["a", "b"], 2, 1);
+        exp.cursor = Some(CursorState {
+            row: 0,
+            col: 0,
+            visible: true,
+        });
+        let mut act = exp.clone();
+        act.cursor = Some(CursorState {
+            row: 0,
+            col: 1,
+            visible: true,
+        });
+        let d = diff(&exp, &act);
+        assert!(!d.is_match());
+        assert!(d.cursor_mismatch.is_some());
+        let display = d.display();
+        assert!(display.contains("cursor mismatch"), "display: {display}");
+    }
+
+    /// When expected has a cursor and actual has none, mismatch is reported.
+    #[test]
+    fn cursor_expected_but_absent_in_actual() {
+        let mut exp = grid(&["a", "b"], 2, 1);
+        exp.cursor = Some(CursorState {
+            row: 0,
+            col: 0,
+            visible: true,
+        });
+        let act = grid(&["a", "b"], 2, 1); // no cursor
+        let d = diff(&exp, &act);
+        assert!(!d.is_match());
+        assert!(d.cursor_mismatch.is_some());
     }
 }

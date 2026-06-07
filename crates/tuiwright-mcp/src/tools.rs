@@ -252,6 +252,12 @@ pub struct TuiAssertInput {
     pub cols: Option<u16>,
     /// Terminal height (default: from config). Only used when ndjson is provided.
     pub rows: Option<u16>,
+    /// Assert that the cursor is at this zero-based row.
+    pub cursor_row: Option<u16>,
+    /// Assert that the cursor is at this zero-based column.
+    pub cursor_col: Option<u16>,
+    /// Assert that the cursor is visible (true) or hidden (false).
+    pub cursor_visible: Option<bool>,
 }
 
 // ---------------------------------------------------------------------------
@@ -704,8 +710,50 @@ impl TuiwrightServer {
             }
         }
 
+        // Cursor assertions.
+        let wants_cursor = input.cursor_row.is_some()
+            || input.cursor_col.is_some()
+            || input.cursor_visible.is_some();
+        if wants_cursor {
+            match grid.cursor {
+                None => {
+                    failures.push(
+                        "cursor assertion failed: grid has no cursor (app may not call set_cursor_position)"
+                            .to_string(),
+                    );
+                }
+                Some(c) => {
+                    if let Some(expected_row) = input.cursor_row {
+                        if c.row != expected_row {
+                            failures.push(format!(
+                                "cursor row: expected {expected_row}, got {}",
+                                c.row
+                            ));
+                        }
+                    }
+                    if let Some(expected_col) = input.cursor_col {
+                        if c.col != expected_col {
+                            failures.push(format!(
+                                "cursor col: expected {expected_col}, got {}",
+                                c.col
+                            ));
+                        }
+                    }
+                    if let Some(expected_vis) = input.cursor_visible {
+                        if c.visible != expected_vis {
+                            failures.push(format!(
+                                "cursor visible: expected {expected_vis}, got {}",
+                                c.visible
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         if failures.is_empty() {
-            let checks = input.contains.len() + input.not_contains.len();
+            let checks =
+                input.contains.len() + input.not_contains.len() + if wants_cursor { 1 } else { 0 };
             Ok(format!("✓ all {checks} assertion(s) passed"))
         } else {
             Err(McpError::invalid_request(
@@ -745,29 +793,45 @@ impl ServerHandler for TuiwrightServer {
 // Rendering helpers
 // ---------------------------------------------------------------------------
 
+/// Format the cursor state as a single annotation line.
+fn cursor_annotation(grid: &tuiwright_core::SnapshotGrid) -> String {
+    match grid.cursor {
+        Some(c) => format!("cursor: row={} col={} visible={}", c.row, c.col, c.visible),
+        None => "cursor: <none>".to_string(),
+    }
+}
+
 /// Render a SnapshotGrid according to the requested format.
 async fn render_snapshot(
     grid: &tuiwright_core::SnapshotGrid,
     format: &SnapshotFormat,
 ) -> anyhow::Result<String> {
     let text = grid.to_plain_text();
+    let cursor = cursor_annotation(grid);
     match format {
-        SnapshotFormat::Text => Ok(format!("```\n{text}```")),
+        SnapshotFormat::Text => Ok(format!("```\n{text}```\n{cursor}")),
         SnapshotFormat::Image => {
             if !tuiwright_core::render::freeze_available().await {
-                return Ok("freeze not found in $PATH — install with: brew install charmbracelet/tap/freeze".to_string());
+                return Ok(format!(
+                    "freeze not found in $PATH — install with: brew install charmbracelet/tap/freeze\n{cursor}"
+                ));
             }
             let png = tmp_png_path();
             tuiwright_core::render::grid_to_png(grid, &png).await?;
-            Ok(format!("PNG saved to {}", png.display()))
+            Ok(format!("PNG saved to {}\n{cursor}", png.display()))
         }
         SnapshotFormat::Both => {
             if !tuiwright_core::render::freeze_available().await {
-                return Ok(format!("freeze not found — text only:\n```\n{text}```"));
+                return Ok(format!(
+                    "freeze not found — text only:\n```\n{text}```\n{cursor}"
+                ));
             }
             let png = tmp_png_path();
             tuiwright_core::render::grid_to_png(grid, &png).await?;
-            Ok(format!("PNG: {}\n\n```\n{text}```", png.display()))
+            Ok(format!(
+                "PNG: {}\n\n```\n{text}```\n{cursor}",
+                png.display()
+            ))
         }
     }
 }
@@ -849,7 +913,7 @@ mod tests {
         for cell in cells[..cols as usize].iter_mut() {
             cell.style.bold = true;
         }
-        SnapshotGrid { cols, rows, cells }
+        SnapshotGrid::new(cols, rows, cells)
     }
 
     fn server_with_headless(cmd: Option<&str>) -> TuiwrightServer {
@@ -1125,7 +1189,7 @@ mod live_tests {
 /// Convert an rmux pane snapshot to a tuiwright SnapshotGrid.
 #[cfg(feature = "live")]
 fn rmux_snapshot_to_grid(snapshot: rmux_sdk::PaneSnapshot) -> tuiwright_core::SnapshotGrid {
-    use tuiwright_core::snapshot::{Cell, CellStyle, Color};
+    use tuiwright_core::snapshot::{Cell, CellStyle, Color, CursorState};
 
     let map_color = |c: &rmux_sdk::PaneColor| -> Option<Color> {
         match c {
@@ -1159,9 +1223,16 @@ fn rmux_snapshot_to_grid(snapshot: rmux_sdk::PaneSnapshot) -> tuiwright_core::Sn
         })
         .collect();
 
+    let cursor = Some(CursorState {
+        row: snapshot.cursor.row,
+        col: snapshot.cursor.col,
+        visible: snapshot.cursor.visible,
+    });
+
     tuiwright_core::SnapshotGrid {
         cols: snapshot.cols,
         rows: snapshot.rows,
         cells,
+        cursor,
     }
 }
