@@ -54,6 +54,97 @@ impl TuiwrightServer {
             tool_router: Self::tool_router(),
         }
     }
+
+    /// Build a `tokio::process::Command` from the `headless_snapshot` template.
+    ///
+    /// The template is split on whitespace *before* `{}` is substituted, so a
+    /// path containing spaces is always passed as a single argument rather than
+    /// being shattered by the split.
+    fn headless_command(
+        &self,
+        ndjson_path: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<tokio::process::Command, McpError> {
+        let template = self.config.headless_snapshot.as_deref().ok_or_else(|| {
+            McpError::invalid_params("headless_snapshot not configured in tuiwright.toml", None)
+        })?;
+        // Split the template first, then replace the placeholder token in each part.
+        let mut parts = template.split_whitespace();
+        let bin = parts
+            .next()
+            .ok_or_else(|| McpError::invalid_params("headless_snapshot command is empty", None))?;
+        let args: Vec<String> = parts
+            .map(|p| {
+                if p == "{}" {
+                    ndjson_path.to_string()
+                } else {
+                    p.to_string()
+                }
+            })
+            .collect();
+        let mut cmd = tokio::process::Command::new(bin);
+        cmd.args(&args)
+            .env("COLUMNS", cols.to_string())
+            .env("LINES", rows.to_string());
+        Ok(cmd)
+    }
+
+    /// Resolve the path for a named baseline file.
+    fn baseline_path(&self, name: &str) -> std::path::PathBuf {
+        self.config.baseline_dir.join(format!("{name}.snap.json"))
+    }
+
+    /// Produce a SnapshotGrid from either headless replay (when `ndjson` is Some)
+    /// or the current live pane (when `ndjson` is None). Used by tui_diff and tui_assert.
+    async fn snapshot_for_diff(
+        &self,
+        ndjson: Option<&str>,
+        cols: Option<u16>,
+        rows: Option<u16>,
+    ) -> Result<tuiwright_core::SnapshotGrid, McpError> {
+        if let Some(ndjson_path) = ndjson {
+            let cols = cols.unwrap_or(self.config.size.cols);
+            let rows = rows.unwrap_or(self.config.size.rows);
+            let output = self
+                .headless_command(ndjson_path, cols, rows)?
+                .output()
+                .await
+                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(McpError::internal_error(
+                    format!("headless command failed: {stderr}"),
+                    None,
+                ));
+            }
+            let ansi = String::from_utf8_lossy(&output.stdout).to_string();
+            Ok(tuiwright_core::ansi_to_grid(&ansi, cols, rows))
+        } else {
+            // Live path.
+            #[cfg(not(feature = "live"))]
+            return Err(McpError::invalid_params(
+                "live feature disabled — provide `ndjson` or rebuild with --features live",
+                None,
+            ));
+            #[cfg(feature = "live")]
+            {
+                let guard = self.session.lock().await;
+                let session = guard.as_ref().ok_or_else(|| {
+                    McpError::invalid_params(
+                        "no live session — call tui_open first or supply `ndjson`",
+                        None,
+                    )
+                })?;
+                let pane = session.session.pane(0, 0);
+                let snapshot = pane
+                    .snapshot()
+                    .await
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                Ok(rmux_snapshot_to_grid(snapshot))
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +231,40 @@ pub struct TuiHeadlessInput {
     /// Output format: "text", "image", or "both" (default).
     #[serde(default)]
     pub format: SnapshotFormat,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct TuiDiffInput {
+    /// Baseline name (filename without extension, stored in baseline_dir).
+    pub baseline: String,
+    /// NDJSON path to replay before snapshotting (same as tui_headless).
+    /// Omit to diff against the current live pane snapshot (requires tui_open).
+    pub ndjson: Option<String>,
+    /// Terminal width (default: from config). Only used when ndjson is provided.
+    pub cols: Option<u16>,
+    /// Terminal height (default: from config). Only used when ndjson is provided.
+    pub rows: Option<u16>,
+    /// If true and no baseline file exists yet, save the current snapshot as the
+    /// new baseline and return a "baseline created" message instead of a diff.
+    #[serde(default)]
+    pub create_if_missing: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, schemars::JsonSchema)]
+pub struct TuiAssertInput {
+    /// Text that must appear somewhere in the grid. All strings must be present.
+    #[serde(default)]
+    pub contains: Vec<String>,
+    /// Text that must NOT appear anywhere in the grid.
+    #[serde(default)]
+    pub not_contains: Vec<String>,
+    /// NDJSON path to replay before snapshotting (same as tui_headless).
+    /// Omit to assert against the current live pane snapshot (requires tui_open).
+    pub ndjson: Option<String>,
+    /// Terminal width (default: from config). Only used when ndjson is provided.
+    pub cols: Option<u16>,
+    /// Terminal height (default: from config). Only used when ndjson is provided.
+    pub rows: Option<u16>,
 }
 
 // ---------------------------------------------------------------------------
@@ -468,34 +593,22 @@ impl TuiwrightServer {
         &self,
         Parameters(input): Parameters<TuiHeadlessInput>,
     ) -> Result<String, McpError> {
-        let cmd_template = self
-            .config
-            .headless_snapshot
-            .as_deref()
-            .ok_or_else(|| McpError::invalid_params(
+        if self.config.headless_snapshot.is_none() {
+            return Err(McpError::invalid_params(
                 "headless_snapshot not configured in tuiwright.toml — set it to your app's ANSI snapshot command, e.g. `design-data --replay {} --snapshot-ansi`",
                 None,
-            ))?;
+            ));
+        }
 
         let cols = input.cols.unwrap_or(self.config.size.cols);
         let rows = input.rows.unwrap_or(self.config.size.rows);
-        let cmd_str = cmd_template.replace("{}", &input.ndjson);
 
-        // Split command into program + args (simple whitespace split — no shell quoting).
-        let mut parts = cmd_str.split_whitespace();
-        let bin = parts
-            .next()
-            .ok_or_else(|| McpError::invalid_params("headless_snapshot command is empty", None))?;
-        let args: Vec<&str> = parts.collect();
-
-        let output = tokio::process::Command::new(bin)
-            .args(&args)
-            .env("COLUMNS", cols.to_string())
-            .env("LINES", rows.to_string())
+        let output = self
+            .headless_command(&input.ndjson, cols, rows)?
             .output()
             .await
             .map_err(|e| {
-                McpError::internal_error(format!("failed to run `{cmd_str}`: {e}"), None)
+                McpError::internal_error(format!("failed to spawn headless command: {e}"), None)
             })?;
 
         if !output.status.success() {
@@ -515,6 +628,99 @@ impl TuiwrightServer {
         render_snapshot(&grid, &input.format)
             .await
             .map_err(|e| McpError::internal_error(e.to_string(), None))
+    }
+
+    /// Diff the current TUI state against a saved baseline snapshot.
+    /// Pass `create_if_missing: true` to create the baseline on first run.
+    #[tool(
+        description = "Diff the current TUI state against a named baseline (.snap.json). \
+                       Supply `ndjson` for headless mode or omit to use the live pane. \
+                       Set `create_if_missing: true` to save a new baseline when none exists yet."
+    )]
+    async fn tui_diff(
+        &self,
+        Parameters(input): Parameters<TuiDiffInput>,
+    ) -> Result<String, McpError> {
+        let grid = self
+            .snapshot_for_diff(input.ndjson.as_deref(), input.cols, input.rows)
+            .await?;
+        let baseline_path = self.baseline_path(&input.baseline);
+
+        if !baseline_path.exists() {
+            if input.create_if_missing {
+                grid.save_baseline(&baseline_path)
+                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+                return Ok(format!("baseline created: {}", baseline_path.display()));
+            }
+            return Err(McpError::invalid_params(
+                format!(
+                    "baseline '{}' not found at {} — run with create_if_missing: true to create it",
+                    input.baseline,
+                    baseline_path.display()
+                ),
+                None,
+            ));
+        }
+
+        let expected = tuiwright_core::SnapshotGrid::load_baseline(&baseline_path)
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        let diff = tuiwright_core::diff(&expected, &grid);
+
+        if diff.is_match() {
+            Ok(format!(
+                "✓ match — {}×{} vs baseline '{}'",
+                grid.cols, grid.rows, input.baseline
+            ))
+        } else {
+            Err(McpError::invalid_request(
+                format!("diff against '{}': {}", input.baseline, diff.display()),
+                None,
+            ))
+        }
+    }
+
+    /// Assert that the current TUI state contains (or does not contain) expected text.
+    #[tool(
+        description = "Assert the rendered TUI contains all strings in `contains` and none in `not_contains`. \
+                       Supply `ndjson` for headless mode or omit to use the live pane. \
+                       Returns a pass summary or fails with details of which assertions failed."
+    )]
+    async fn tui_assert(
+        &self,
+        Parameters(input): Parameters<TuiAssertInput>,
+    ) -> Result<String, McpError> {
+        let grid = self
+            .snapshot_for_diff(input.ndjson.as_deref(), input.cols, input.rows)
+            .await?;
+        let text = grid.to_plain_text();
+
+        let mut failures: Vec<String> = Vec::new();
+
+        for expected in &input.contains {
+            if !text.contains(expected.as_str()) {
+                failures.push(format!("expected to find: {:?}", expected));
+            }
+        }
+        for forbidden in &input.not_contains {
+            if text.contains(forbidden.as_str()) {
+                failures.push(format!("expected NOT to find: {:?}", forbidden));
+            }
+        }
+
+        if failures.is_empty() {
+            let checks = input.contains.len() + input.not_contains.len();
+            Ok(format!("✓ all {checks} assertion(s) passed"))
+        } else {
+            Err(McpError::invalid_request(
+                format!(
+                    "{} assertion(s) failed:\n{}\n\nRendered grid:\n```\n{}```",
+                    failures.len(),
+                    failures.join("\n"),
+                    text
+                ),
+                None,
+            ))
+        }
     }
 }
 
