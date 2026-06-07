@@ -23,13 +23,10 @@ fn fixture_bin() -> std::path::PathBuf {
 fn headless_fixture_round_trip() {
     let bin = fixture_bin();
     if !bin.exists() {
-        // The binary is built alongside other workspace members; skip if absent
-        // (e.g. running `cargo test -p tuiwright-core` in isolation).
-        eprintln!(
-            "SKIP: tuiwright-fixture not found at {}. Run `cargo test` from the workspace root.",
+        panic!(
+            "tuiwright-fixture not found at {}. Run `cargo test --workspace` to build all members first.",
             bin.display()
         );
-        return;
     }
 
     // ── Run fixture in headless mode ──────────────────────────────────────

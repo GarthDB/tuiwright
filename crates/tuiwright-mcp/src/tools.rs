@@ -55,14 +55,44 @@ impl TuiwrightServer {
         }
     }
 
+    /// Build a `tokio::process::Command` from the `headless_snapshot` template.
+    ///
+    /// The template is split on whitespace *before* `{}` is substituted, so a
+    /// path containing spaces is always passed as a single argument rather than
+    /// being shattered by the split.
+    fn headless_command(
+        &self,
+        ndjson_path: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Result<tokio::process::Command, McpError> {
+        let template = self.config.headless_snapshot.as_deref().ok_or_else(|| {
+            McpError::invalid_params("headless_snapshot not configured in tuiwright.toml", None)
+        })?;
+        // Split the template first, then replace the placeholder token in each part.
+        let mut parts = template.split_whitespace();
+        let bin = parts
+            .next()
+            .ok_or_else(|| McpError::invalid_params("headless_snapshot command is empty", None))?;
+        let args: Vec<String> = parts
+            .map(|p| {
+                if p == "{}" {
+                    ndjson_path.to_string()
+                } else {
+                    p.to_string()
+                }
+            })
+            .collect();
+        let mut cmd = tokio::process::Command::new(bin);
+        cmd.args(&args)
+            .env("COLUMNS", cols.to_string())
+            .env("LINES", rows.to_string());
+        Ok(cmd)
+    }
+
     /// Resolve the path for a named baseline file.
     fn baseline_path(&self, name: &str) -> std::path::PathBuf {
-        let dir = self
-            .config
-            .baseline_dir
-            .clone()
-            .unwrap_or_else(|| std::path::PathBuf::from(".tuiwright/baselines"));
-        dir.join(format!("{name}.snap.json"))
+        self.config.baseline_dir.join(format!("{name}.snap.json"))
     }
 
     /// Produce a SnapshotGrid from either headless replay (when `ndjson` is Some)
@@ -74,22 +104,10 @@ impl TuiwrightServer {
         rows: Option<u16>,
     ) -> Result<tuiwright_core::SnapshotGrid, McpError> {
         if let Some(ndjson_path) = ndjson {
-            // Headless path: run the configured snapshot command.
-            let cmd_template = self.config.headless_snapshot.as_deref().ok_or_else(|| {
-                McpError::invalid_params("headless_snapshot not configured in tuiwright.toml", None)
-            })?;
             let cols = cols.unwrap_or(self.config.size.cols);
             let rows = rows.unwrap_or(self.config.size.rows);
-            let cmd_str = cmd_template.replace("{}", ndjson_path);
-            let mut parts = cmd_str.split_whitespace();
-            let bin = parts.next().ok_or_else(|| {
-                McpError::invalid_params("headless_snapshot command is empty", None)
-            })?;
-            let args: Vec<&str> = parts.collect();
-            let output = tokio::process::Command::new(bin)
-                .args(&args)
-                .env("COLUMNS", cols.to_string())
-                .env("LINES", rows.to_string())
+            let output = self
+                .headless_command(ndjson_path, cols, rows)?
                 .output()
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
@@ -575,35 +593,21 @@ impl TuiwrightServer {
         &self,
         Parameters(input): Parameters<TuiHeadlessInput>,
     ) -> Result<String, McpError> {
-        let cmd_template = self
-            .config
-            .headless_snapshot
-            .as_deref()
-            .ok_or_else(|| McpError::invalid_params(
-                "headless_snapshot not configured in tuiwright.toml — set it to your app's ANSI snapshot command, e.g. `design-data --replay {} --snapshot-ansi`",
-                None,
-            ))?;
-
         let cols = input.cols.unwrap_or(self.config.size.cols);
         let rows = input.rows.unwrap_or(self.config.size.rows);
-        let cmd_str = cmd_template.replace("{}", &input.ndjson);
 
-        // Split command into program + args (simple whitespace split — no shell quoting).
-        let mut parts = cmd_str.split_whitespace();
-        let bin = parts
-            .next()
-            .ok_or_else(|| McpError::invalid_params("headless_snapshot command is empty", None))?;
-        let args: Vec<&str> = parts.collect();
-
-        let output = tokio::process::Command::new(bin)
-            .args(&args)
-            .env("COLUMNS", cols.to_string())
-            .env("LINES", rows.to_string())
+        let output = self
+            .headless_command(&input.ndjson, cols, rows)
+            .map_err(|mut e| {
+                // Improve the error message for the common "not configured" case.
+                if e.message.contains("not configured") {
+                    e.message = "headless_snapshot not configured in tuiwright.toml — set it to your app's ANSI snapshot command, e.g. `design-data --replay {} --snapshot-ansi`".into();
+                }
+                e
+            })?
             .output()
             .await
-            .map_err(|e| {
-                McpError::internal_error(format!("failed to run `{cmd_str}`: {e}"), None)
-            })?;
+            .map_err(|e| McpError::internal_error(format!("failed to spawn headless command: {e}"), None))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -662,12 +666,11 @@ impl TuiwrightServer {
 
         if diff.is_match() {
             Ok(format!(
-                "✓ match — {} vs baseline '{}'",
-                grid.cols * grid.rows,
-                input.baseline
+                "✓ match — {}×{} vs baseline '{}'",
+                grid.cols, grid.rows, input.baseline
             ))
         } else {
-            Err(McpError::internal_error(
+            Err(McpError::invalid_request(
                 format!("diff against '{}': {}", input.baseline, diff.display()),
                 None,
             ))
@@ -706,7 +709,7 @@ impl TuiwrightServer {
             let checks = input.contains.len() + input.not_contains.len();
             Ok(format!("✓ all {checks} assertion(s) passed"))
         } else {
-            Err(McpError::internal_error(
+            Err(McpError::invalid_request(
                 format!(
                     "{} assertion(s) failed:\n{}\n\nRendered grid:\n```\n{}```",
                     failures.len(),

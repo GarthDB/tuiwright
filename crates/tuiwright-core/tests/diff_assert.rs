@@ -4,6 +4,11 @@
 //! - `tuiwright_core::diff` on grids produced by the fixture (proves style-aware diffing)
 //! - `SnapshotGrid::save_baseline` / `load_baseline` round-trip
 //! - Assertion helpers built from the public API (`to_plain_text` + `contains`)
+//!
+//! These tests require the `tuiwright-fixture` binary to be built. Run from the
+//! workspace root (`cargo test`) so all members are compiled first.
+//! Marked `#[ignore]` when the binary is absent so skips are visible in output;
+//! run `cargo test --workspace` to ensure the binary is built before these execute.
 
 use std::process::Command;
 use tuiwright_core::{ansi_to_grid, diff, snapshot::Color};
@@ -14,13 +19,17 @@ fn fixture_bin() -> std::path::PathBuf {
     workspace.join("target/debug/tuiwright-fixture")
 }
 
+fn require_fixture() {
+    if !fixture_bin().exists() {
+        panic!(
+            "tuiwright-fixture not found at {}. Run `cargo test --workspace` to build all members first.",
+            fixture_bin().display()
+        );
+    }
+}
+
 fn run_fixture(extra_args: &[&str]) -> tuiwright_core::SnapshotGrid {
     let bin = fixture_bin();
-    assert!(
-        bin.exists(),
-        "tuiwright-fixture not found at {}. Run `cargo test` from workspace root.",
-        bin.display()
-    );
     let output = Command::new(&bin)
         .arg("--snapshot-ansi")
         .args(extra_args)
@@ -40,11 +49,7 @@ fn run_fixture(extra_args: &[&str]) -> tuiwright_core::SnapshotGrid {
 /// Two snapshots of the same state must diff as identical.
 #[test]
 fn diff_identical_snapshots_match() {
-    let bin = fixture_bin();
-    if !bin.exists() {
-        eprintln!("SKIP: fixture not built");
-        return;
-    }
+    require_fixture();
     let g1 = run_fixture(&[]);
     let g2 = run_fixture(&[]);
     let d = diff(&g1, &g2);
@@ -58,11 +63,7 @@ fn diff_identical_snapshots_match() {
 /// After a Down keypress the selected row changes style — diff detects this.
 #[test]
 fn diff_detects_selection_change() {
-    let bin = fixture_bin();
-    if !bin.exists() {
-        eprintln!("SKIP: fixture not built");
-        return;
-    }
+    require_fixture();
 
     let events_file = std::env::temp_dir().join("tuiwright_diff_test.ndjson");
     std::fs::write(&events_file, r#"{"key":"Down"}"#).unwrap();
@@ -81,6 +82,7 @@ fn diff_detects_selection_change() {
     );
 
     // Verify colour change: the new selection has Yellow fg (Ansi 3).
+    // Note: this couples to the fixture's Yellow selection style.
     let has_yellow = d
         .changed_cells
         .iter()
@@ -96,11 +98,7 @@ fn diff_detects_selection_change() {
 /// Baseline save/load round-trip preserves the grid exactly.
 #[test]
 fn baseline_save_load_roundtrip() {
-    let bin = fixture_bin();
-    if !bin.exists() {
-        eprintln!("SKIP: fixture not built");
-        return;
-    }
+    require_fixture();
 
     let grid = run_fixture(&[]);
     let path = std::env::temp_dir().join("tuiwright_baseline_test.snap.json");
@@ -121,11 +119,7 @@ fn baseline_save_load_roundtrip() {
 /// Text assertion helpers: plain_text contains expected strings.
 #[test]
 fn assert_contains_text() {
-    let bin = fixture_bin();
-    if !bin.exists() {
-        eprintln!("SKIP: fixture not built");
-        return;
-    }
+    require_fixture();
 
     let grid = run_fixture(&[]);
     let text = grid.to_plain_text();

@@ -29,7 +29,8 @@ pub struct Config {
 
     /// Directory where baseline `.snap.json` files are stored.
     /// Defaults to `.tuiwright/baselines` relative to the working directory.
-    pub baseline_dir: Option<std::path::PathBuf>,
+    #[serde(default = "default_baseline_dir")]
+    pub baseline_dir: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -57,6 +58,10 @@ impl Default for SizeConfig {
             rows: DEFAULT_ROWS,
         }
     }
+}
+
+fn default_baseline_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(".tuiwright/baselines")
 }
 
 impl Config {

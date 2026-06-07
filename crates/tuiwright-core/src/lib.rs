@@ -11,5 +11,5 @@ pub mod snapshot;
 
 pub use ansi::ansi_to_grid;
 pub use config::Config;
-pub use diff::{diff, GridDiff};
+pub use diff::{diff, CellDiff, GridDiff};
 pub use snapshot::{CellStyle, SnapshotGrid};
