@@ -61,18 +61,51 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+# Build (headless-only, no rmux required)
+cargo build --no-default-features
+
+# Build with live path (requires rmux daemon)
+cargo build
+
+# Run headless tests (CI-safe, no external deps except freeze)
+cargo test --no-default-features
+
+# Run all tests including live path (requires rmux + freeze)
+cargo test --features live
+
+# Lint
+cargo clippy --no-default-features -- -D warnings
+
+# Format
+cargo fmt --all
+
+# Security audit
+cargo audit
 ```
+
+The `live` feature gates everything that touches the rmux daemon.
+CI headless tests require `freeze` on PATH (ANSI → PNG); live tests additionally require `rmux`.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Workspace with three crates:
+
+- **`tuiwright-core`** — library: ANSI decode (`ansi.rs`), config (`config.rs`), rendering/PNG (`render.rs`), snapshot grid (`snapshot.rs`), visual diff (`diff.rs`).
+- **`tuiwright-mcp`** — binary (`tuiwright`): MCP server over stdio using `rmcp`. Exposes all `tui_*` tools. Live tools are feature-gated behind `live = ["dep:rmux-sdk"]`.
+- **`tuiwright-fixture`** — small ratatui app used by integration tests; not published to crates.io.
+
+Two rendering paths share one MCP tool surface:
+
+```
+headless  →  tui_headless(ndjson)  →  headless_snapshot cmd  →  ANSI stdout  →  grid + PNG
+live      →  tui_open  →  rmux session  →  tui_send_keys / tui_snapshot / tui_record_*
+```
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- **Feature gating**: headless tests run with `--no-default-features`; live tests require `--features live`. Never make headless code depend on `rmux-sdk`.
+- **`schemars`**: all MCP tool input structs derive `JsonSchema` so `rmcp` generates the JSON Schema automatically.
+- **Snapshot tests**: use `insta` with RON serialisation. Run `cargo insta review` to accept new snapshots.
+- **Error types**: use `thiserror` for library errors; `anyhow` for binary/test error propagation.
+- **Config**: `tuiwright.toml` in the target project root; loaded by `tuiwright_core::Config`. The `headless_snapshot` field uses `{}` as the NDJSON path placeholder.
