@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/GarthDB/tuiwright/compare/tuiwright-mcp-v0.1.0...tuiwright-mcp-v0.1.1) - 2026-06-07
+
+### Other
+
+- release v0.1.0
+
 ## [0.1.0](https://github.com/GarthDB/tuiwright/releases/tag/tuiwright-mcp-v0.1.0) - 2026-06-07
 
 ### Added
