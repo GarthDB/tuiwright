@@ -331,10 +331,15 @@ mod tests {
 
     /// Multi-byte UTF-8 graphemes must land in a single cell, not scatter across
     /// continuation bytes.
+    ///
+    /// Note: wide characters (😀 occupies 2 terminal columns) are stored as-is.
+    /// The decoder treats each grapheme cluster as one cell entry regardless of
+    /// display width; callers that need to account for wide-char column offsets
+    /// must do so at a higher level.
     #[test]
     fn multi_byte_grapheme_single_cell() {
-        let emoji = "😀"; // U+1F600 — 4 bytes
-        let cjk = "中"; // U+4E2D — 3 bytes
+        let emoji = "😀"; // U+1F600 — 4 bytes, wide (2 terminal cols)
+        let cjk = "中"; // U+4E2D — 3 bytes, wide (2 terminal cols)
         let cells = vec![
             Cell {
                 symbol: emoji.to_string(),
@@ -355,11 +360,12 @@ mod tests {
         assert_eq!(decoded.cells[1].symbol, cjk);
     }
 
-    /// SGR params with no defined meaning must not corrupt state or panic.
+    /// SGR params not handled by this decoder must not corrupt state or panic.
     #[test]
     fn unknown_sgr_codes_ignored() {
-        // 22 = bold-off (not implemented), 39/49 = default fg/bg (not implemented),
-        // 999 = undefined. None should panic; the symbol must be placed.
+        // 22 = bold-off, 39/49 = default fg/bg (both are valid ANSI codes but
+        // not yet implemented — the decoder ignores unrecognised params).
+        // 999 = reserved/undefined. None should panic; the symbol must be placed.
         let input = "\x1b[1;22;39;49;999mA\x1b[0m\n";
         let decoded = ansi_to_grid(input, 1, 1);
         assert_eq!(decoded.cells[0].symbol, "A");
