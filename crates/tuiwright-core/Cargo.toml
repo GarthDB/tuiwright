@@ -1,6 +1,8 @@
 [package]
 name = "tuiwright-core"
 description = "Core types and rendering utilities for tuiwright — Playwright-style TUI development for AI agents"
+keywords = ["tui", "terminal", "testing", "mcp", "ratatui"]
+categories = ["development-tools::testing", "command-line-utilities"]
 version.workspace = true
 edition.workspace = true
 license.workspace = true
