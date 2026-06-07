@@ -1024,7 +1024,7 @@ mod live_tests {
         assert!(open.is_ok(), "tui_open failed: {:?}", open);
 
         // ── Poll until fixture renders (up to 3 s) ──────────────────────
-        let snap1_text = {
+        {
             let mut found = None;
             for _ in 0..15 {
                 tokio::time::sleep(std::time::Duration::from_millis(200)).await;
@@ -1040,9 +1040,8 @@ mod live_tests {
                     }
                 }
             }
-            found.expect("fixture did not render 'tuiwright fixture' within 3 s")
-        };
-        let _ = snap1_text; // used in assertion above
+            found.expect("fixture did not render 'tuiwright fixture' within 3 s");
+        }
 
         // ── Send Down arrow ──────────────────────────────────────────────
         let keys = server
