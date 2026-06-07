@@ -9,7 +9,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 /// A full snapshot of a terminal pane at a point in time.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SnapshotGrid {
     pub cols: u16,
     pub rows: u16,
@@ -49,7 +49,7 @@ impl SnapshotGrid {
 }
 
 /// A single terminal cell.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Cell {
     /// The rendered grapheme (usually one char, but can be multi-byte).
     pub symbol: String,
@@ -66,7 +66,7 @@ impl Default for Cell {
 }
 
 /// Style attributes for a single cell.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CellStyle {
     pub fg: Option<Color>,
     pub bg: Option<Color>,
@@ -77,7 +77,7 @@ pub struct CellStyle {
 }
 
 /// Terminal color — supports the three common encoding forms.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "value")]
 pub enum Color {
     /// ANSI named color (index 0–15).

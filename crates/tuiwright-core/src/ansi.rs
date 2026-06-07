@@ -279,6 +279,124 @@ mod tests {
         assert_eq!(plain, "hello");
     }
 
+    /// All 8 bright ANSI fg colors (Ansi 8–15) must round-trip through grid_to_ansi → ansi_to_grid.
+    #[test]
+    fn bright_fg_roundtrip() {
+        for n in 8u8..=15 {
+            let style = CellStyle {
+                fg: Some(Color::Ansi(n)),
+                ..Default::default()
+            };
+            let grid = SnapshotGrid {
+                cols: 1,
+                rows: 1,
+                cells: vec![Cell {
+                    symbol: "X".to_string(),
+                    style,
+                }],
+            };
+            let decoded = ansi_to_grid(&grid_to_ansi(&grid), 1, 1);
+            assert_eq!(
+                decoded.cells[0].style.fg,
+                Some(Color::Ansi(n)),
+                "bright fg Ansi({n}) did not round-trip"
+            );
+        }
+    }
+
+    /// All 8 bright ANSI bg colors (Ansi 8–15) must round-trip.
+    #[test]
+    fn bright_bg_roundtrip() {
+        for n in 8u8..=15 {
+            let style = CellStyle {
+                bg: Some(Color::Ansi(n)),
+                ..Default::default()
+            };
+            let grid = SnapshotGrid {
+                cols: 1,
+                rows: 1,
+                cells: vec![Cell {
+                    symbol: "X".to_string(),
+                    style,
+                }],
+            };
+            let decoded = ansi_to_grid(&grid_to_ansi(&grid), 1, 1);
+            assert_eq!(
+                decoded.cells[0].style.bg,
+                Some(Color::Ansi(n)),
+                "bright bg Ansi({n}) did not round-trip"
+            );
+        }
+    }
+
+    /// Multi-byte UTF-8 graphemes must land in a single cell, not scatter across
+    /// continuation bytes.
+    ///
+    /// Note: wide characters (😀 occupies 2 terminal columns) are stored as-is.
+    /// The decoder treats each grapheme cluster as one cell entry regardless of
+    /// display width; callers that need to account for wide-char column offsets
+    /// must do so at a higher level.
+    #[test]
+    fn multi_byte_grapheme_single_cell() {
+        let emoji = "😀"; // U+1F600 — 4 bytes, wide (2 terminal cols)
+        let cjk = "中"; // U+4E2D — 3 bytes, wide (2 terminal cols)
+        let cells = vec![
+            Cell {
+                symbol: emoji.to_string(),
+                style: Default::default(),
+            },
+            Cell {
+                symbol: cjk.to_string(),
+                style: Default::default(),
+            },
+        ];
+        let grid = SnapshotGrid {
+            cols: 2,
+            rows: 1,
+            cells,
+        };
+        let decoded = ansi_to_grid(&grid_to_ansi(&grid), 2, 1);
+        assert_eq!(decoded.cells[0].symbol, emoji);
+        assert_eq!(decoded.cells[1].symbol, cjk);
+    }
+
+    /// SGR params not handled by this decoder must not corrupt state or panic.
+    #[test]
+    fn unknown_sgr_codes_ignored() {
+        // 22 = bold-off, 39/49 = default fg/bg (both are valid ANSI codes but
+        // not yet implemented — the decoder ignores unrecognised params).
+        // 999 = reserved/undefined. None should panic; the symbol must be placed.
+        let input = "\x1b[1;22;39;49;999mA\x1b[0m\n";
+        let decoded = ansi_to_grid(input, 1, 1);
+        assert_eq!(decoded.cells[0].symbol, "A");
+    }
+
+    /// A CSI sequence truncated at end-of-input must not panic.
+    #[test]
+    fn partial_csi_at_eof_no_panic() {
+        let input = "A\x1b["; // ESC [ with no params or final byte
+        let decoded = ansi_to_grid(input, 2, 1);
+        assert_eq!(decoded.cells[0].symbol, "A");
+    }
+
+    /// CSI H (cursor home) is silently skipped; content placed at the current column.
+    #[test]
+    fn cursor_home_csi_skipped() {
+        let input = "A\x1b[HB\n";
+        let decoded = ansi_to_grid(input, 2, 1);
+        assert_eq!(decoded.cells[0].symbol, "A");
+        assert_eq!(decoded.cells[1].symbol, "B");
+    }
+
+    /// CSI 2C (cursor forward) is silently skipped; next char placed at the current column.
+    #[test]
+    fn cursor_forward_csi_skipped() {
+        let input = "A\x1b[2CB\n";
+        let decoded = ansi_to_grid(input, 2, 1);
+        assert_eq!(decoded.cells[0].symbol, "A");
+        assert_eq!(decoded.cells[1].symbol, "B");
+    }
+
     /// Round-trip: grid_to_ansi → ansi_to_grid must reproduce symbols and styles.
     #[test]
     fn styled_roundtrip() {
