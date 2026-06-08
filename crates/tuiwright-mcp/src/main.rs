@@ -24,15 +24,17 @@ async fn main() -> Result<()> {
 }
 
 fn parse_config_path() -> std::path::PathBuf {
-    let args: Vec<String> = std::env::args().collect();
-    let mut i = 1;
-    while i < args.len() {
-        if args[i] == "--config" {
-            if let Some(path) = args.get(i + 1) {
-                return std::path::PathBuf::from(path);
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == "--config" {
+            match args.next() {
+                Some(path) => return std::path::PathBuf::from(path),
+                None => {
+                    eprintln!("error: --config requires a path argument");
+                    std::process::exit(1);
+                }
             }
         }
-        i += 1;
     }
     std::path::PathBuf::from("tuiwright.toml")
 }
