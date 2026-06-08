@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.1](https://github.com/GarthDB/tuiwright/compare/tuiwright-core-v0.2.0...tuiwright-core-v0.2.1) - 2026-06-08
+
+### Other
+
+- release v0.2.0 ([#17](https://github.com/GarthDB/tuiwright/pull/17))
+
 ## [0.2.0](https://github.com/GarthDB/tuiwright/compare/tuiwright-core-v0.1.1...tuiwright-core-v0.2.0) - 2026-06-07
 
 ### Added
