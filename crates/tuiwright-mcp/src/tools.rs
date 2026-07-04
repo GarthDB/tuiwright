@@ -10,7 +10,7 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tuiwright_core::Config;
+use tuiwright_core::{Config, DiffMasks};
 
 // ---------------------------------------------------------------------------
 // Server struct
@@ -20,6 +20,7 @@ use tuiwright_core::Config;
 #[derive(Clone)]
 pub struct TuiwrightServer {
     config: Config,
+    diff_masks: DiffMasks,
     /// Active live session (rmux), if any.
     #[cfg(feature = "live")]
     session: Arc<Mutex<Option<LiveSession>>>,
@@ -46,8 +47,10 @@ struct RecordingState {
 
 impl TuiwrightServer {
     pub fn new(config: Config) -> Self {
+        let diff_masks = DiffMasks::compile(&config.diff.ignore_patterns);
         Self {
             config,
+            diff_masks,
             #[cfg(feature = "live")]
             session: Arc::new(Mutex::new(None)),
             recording: Arc::new(Mutex::new(None)),
@@ -117,18 +120,13 @@ impl TuiwrightServer {
             #[cfg(feature = "live")]
             {
                 let guard = self.session.lock().await;
-                let session = guard.as_ref().ok_or_else(|| {
+                let live = guard.as_ref().ok_or_else(|| {
                     McpError::invalid_params(
                         "no live session — call tui_open first or supply `ndjson`",
                         None,
                     )
                 })?;
-                let pane = session.session.pane(0, 0);
-                let snapshot = pane
-                    .snapshot()
-                    .await
-                    .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-                Ok(rmux_snapshot_to_grid(snapshot))
+                live_quiet_snapshot(&live.session, self.config.diff.quiet_ms).await
             }
         }
     }
@@ -392,16 +390,10 @@ impl TuiwrightServer {
         #[cfg(feature = "live")]
         {
             let guard = self.session.lock().await;
-            let session = guard.as_ref().ok_or_else(|| {
+            let live = guard.as_ref().ok_or_else(|| {
                 McpError::invalid_params("no live session — call tui_open first", None)
             })?;
-
-            let pane = session.session.pane(0, 0);
-            let snapshot = pane
-                .snapshot()
-                .await
-                .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-            let grid = rmux_snapshot_to_grid(snapshot);
+            let grid = live_quiet_snapshot(&live.session, self.config.diff.quiet_ms).await?;
             drop(guard);
 
             // Append frame to active recording.
@@ -476,6 +468,24 @@ impl TuiwrightServer {
                 .resize(size)
                 .await
                 .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+            if let Err(err) = wait_for_pane_size(
+                &session.session,
+                input.cols,
+                input.rows,
+                std::time::Duration::from_secs(2),
+            )
+            .await
+            {
+                return Err(McpError::internal_error(
+                    format!(
+                        "{}\n\
+                         hint: rmux single-pane resize may not change window dimensions — \
+                         use tui_close then tui_open(cols={}, rows={}) for breakpoint tests",
+                        err.message, input.cols, input.rows
+                    ),
+                    None,
+                ));
+            }
             session.cols = input.cols;
             session.rows = input.rows;
             Ok(format!("resized to {}x{}", input.cols, input.rows))
@@ -667,7 +677,7 @@ impl TuiwrightServer {
 
         let expected = tuiwright_core::SnapshotGrid::load_baseline(&baseline_path)
             .map_err(|e| McpError::internal_error(e.to_string(), None))?;
-        let diff = tuiwright_core::diff(&expected, &grid);
+        let diff = tuiwright_core::diff_masked(&expected, &grid, &self.diff_masks);
 
         if diff.is_match() {
             Ok(format!(
@@ -1184,6 +1194,154 @@ mod live_tests {
             "expected 'no live session' error; got: {msg}"
         );
     }
+
+    /// Reopening at a target size (S3 fallback) sets pane dimensions when in-session resize cannot.
+    #[tokio::test]
+    async fn live_reopen_at_size_sets_pane_dimensions() {
+        if !rmux_available().await {
+            eprintln!("SKIP: rmux daemon not running");
+            return;
+        }
+        let bin = fixture_bin();
+        if !bin.exists() {
+            eprintln!("SKIP: tuiwright-fixture not found");
+            return;
+        }
+
+        let config = Config {
+            launch: LaunchConfig {
+                command: Some(bin.to_str().unwrap().to_string()),
+                ..Default::default()
+            },
+            size: SizeConfig { cols: 120, rows: 40 },
+            ..Default::default()
+        };
+        let server = TuiwrightServer::new(config);
+
+        server
+            .tui_open(Parameters(TuiOpenInput {
+                command: None,
+                args: vec![],
+                cols: Some(120),
+                rows: Some(40),
+                session: Some("tuiwright-reopen-size-test".to_string()),
+            }))
+            .await
+            .expect("tui_open");
+
+        server.tui_close().await.expect("tui_close");
+
+        server
+            .tui_open(Parameters(TuiOpenInput {
+                command: None,
+                args: vec![],
+                cols: Some(70),
+                rows: Some(40),
+                session: Some("tuiwright-reopen-size-test".to_string()),
+            }))
+            .await
+            .expect("tui_open at 70");
+
+        let guard = server.session.lock().await;
+        let live = guard.as_ref().expect("session");
+        let snap = live
+            .session
+            .pane(0, 0)
+            .snapshot()
+            .await
+            .expect("snapshot");
+        assert_eq!(snap.cols, 70, "pane cols after reopen");
+        assert_eq!(snap.rows, 40, "pane rows after reopen");
+        drop(guard);
+
+        server.tui_close().await.expect("tui_close");
+    }
+}
+
+/// Poll until the rmux pane reports the target dimensions (post-resize settle).
+#[cfg(feature = "live")]
+async fn wait_for_pane_size(
+    session: &rmux_sdk::Session,
+    cols: u16,
+    rows: u16,
+    timeout: std::time::Duration,
+) -> Result<(), McpError> {
+    let pane = session.pane(0, 0);
+    let deadline = std::time::Instant::now() + timeout;
+    let mut last_actual = (0u16, 0u16);
+    while std::time::Instant::now() < deadline {
+        let snapshot = pane
+            .snapshot()
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        if snapshot.cols == cols && snapshot.rows == rows {
+            return Ok(());
+        }
+        last_actual = (snapshot.cols, snapshot.rows);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(McpError::internal_error(
+        format!(
+            "resize did not settle: expected {cols}x{rows}, last pane size {}x{}",
+            last_actual.0, last_actual.1
+        ),
+        None,
+    ))
+}
+
+/// Capture a live pane snapshot after the grid stays unchanged for `quiet_ms`.
+#[cfg(feature = "live")]
+async fn live_quiet_snapshot(
+    session: &rmux_sdk::Session,
+    quiet_ms: u64,
+) -> Result<tuiwright_core::SnapshotGrid, McpError> {
+    let quiet = std::time::Duration::from_millis(quiet_ms.max(1));
+    let max_wait = std::time::Duration::from_secs(10);
+    let pane = session.pane(0, 0);
+    let started = std::time::Instant::now();
+    let mut last_hash: Option<u64> = None;
+    let mut stable_since: Option<std::time::Instant> = None;
+    let mut latest = loop {
+        let snapshot = pane
+            .snapshot()
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        break rmux_snapshot_to_grid(snapshot);
+    };
+
+    loop {
+        let snapshot = pane
+            .snapshot()
+            .await
+            .map_err(|e| McpError::internal_error(e.to_string(), None))?;
+        latest = rmux_snapshot_to_grid(snapshot);
+        let hash = grid_stable_hash(&latest);
+        if Some(hash) == last_hash {
+            let since = stable_since.get_or_insert_with(std::time::Instant::now);
+            if since.elapsed() >= quiet {
+                return Ok(latest);
+            }
+        } else {
+            last_hash = Some(hash);
+            stable_since = Some(std::time::Instant::now());
+        }
+        if started.elapsed() >= max_wait {
+            return Ok(latest);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+}
+
+#[cfg(feature = "live")]
+fn grid_stable_hash(grid: &tuiwright_core::SnapshotGrid) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    grid.cols.hash(&mut hasher);
+    grid.rows.hash(&mut hasher);
+    for cell in &grid.cells {
+        cell.symbol.hash(&mut hasher);
+    }
+    hasher.finish()
 }
 
 /// Convert an rmux pane snapshot to a tuiwright SnapshotGrid.
