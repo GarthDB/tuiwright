@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0](https://github.com/GarthDB/tuiwright/compare/tuiwright-mcp-v0.2.0...tuiwright-mcp-v0.3.0) - 2026-09-15
+
+### Added
+
+- add --config flag to tuiwright MCP server ([#20](https://github.com/GarthDB/tuiwright/pull/20))
+
+### Fixed
+
+- *(live)* quiet snapshots, stable tui_diff baselines, and resize failure detection ([#21](https://github.com/GarthDB/tuiwright/pull/21))
+- upgrade rmcp 0.16 -> 3.4 to fix Copilot CLI handshake crash ([#22](https://github.com/GarthDB/tuiwright/pull/22))
+
+### Other
+
+- release v0.2.0 ([#17](https://github.com/GarthDB/tuiwright/pull/17))
+
 ## [0.2.0](https://github.com/GarthDB/tuiwright/compare/tuiwright-mcp-v0.1.1...tuiwright-mcp-v0.2.0) - 2026-06-07
 
 ### Added
