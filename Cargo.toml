@@ -43,5 +43,8 @@ thiserror = "2"
 # Config
 toml = "0.8"
 
+# Pattern masking for baseline diffs
+regex = "1"
+
 # Testing
 insta = { version = "1", features = ["ron"] }

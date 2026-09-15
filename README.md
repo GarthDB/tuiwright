@@ -91,6 +91,14 @@ rows = 24
 # Command to render a state NDJSON headlessly to styled ANSI stdout.
 # {} is substituted with the NDJSON path at runtime.
 headless_snapshot = "target/debug/my-tui --replay {} --snapshot-ansi"
+
+baseline_dir = ".tuiwright/baselines"
+
+[diff]
+# Regex patterns masked in tui_diff (volatile ids, paths, versions).
+ignore_patterns = ["hs-\\S+", "v\\d+\\.\\d+\\.\\d+"]
+# Live snapshots wait until the pane is unchanged for this many ms.
+quiet_ms = 300
 ```
 
 ### Register as an MCP server in Claude Code

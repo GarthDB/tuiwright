@@ -7,9 +7,12 @@ pub const DEFAULT_COLS: u16 = 80;
 /// Default terminal height in rows when `tuiwright.toml` doesn't specify one.
 pub const DEFAULT_ROWS: u16 = 24;
 
+/// Default milliseconds of unchanged grid before a live snapshot is captured.
+pub const DEFAULT_QUIET_MS: u64 = 300;
+
 /// Root configuration, read from `tuiwright.toml` in the project root (or
 /// supplied via CLI flags to the MCP server).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     /// How to launch the TUI app in a live rmux pane.
     #[serde(default)]
@@ -32,6 +35,22 @@ pub struct Config {
     /// Defaults to `.tuiwright/baselines` relative to the working directory.
     #[serde(default = "default_baseline_dir")]
     pub baseline_dir: std::path::PathBuf,
+
+    /// Baseline diff and live snapshot behaviour.
+    #[serde(default)]
+    pub diff: DiffConfig,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            launch: LaunchConfig::default(),
+            size: SizeConfig::default(),
+            headless_snapshot: None,
+            baseline_dir: default_baseline_dir(),
+            diff: DiffConfig::default(),
+        }
+    }
 }
 
 /// How to launch the TUI app in a live rmux session.
@@ -67,6 +86,31 @@ impl Default for SizeConfig {
 
 fn default_baseline_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(".tuiwright/baselines")
+}
+
+/// Options for `tui_diff` masking and live snapshot quiet windows.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiffConfig {
+    /// Regex patterns applied to cell symbols before diffing. Matching substrings
+    /// are replaced with `*` so volatile ids/paths do not fail baselines.
+    #[serde(default)]
+    pub ignore_patterns: Vec<String>,
+    /// Live snapshots wait until the pane grid is unchanged for this many ms.
+    #[serde(default = "default_quiet_ms")]
+    pub quiet_ms: u64,
+}
+
+impl Default for DiffConfig {
+    fn default() -> Self {
+        Self {
+            ignore_patterns: Vec::new(),
+            quiet_ms: default_quiet_ms(),
+        }
+    }
+}
+
+fn default_quiet_ms() -> u64 {
+    DEFAULT_QUIET_MS
 }
 
 impl Config {

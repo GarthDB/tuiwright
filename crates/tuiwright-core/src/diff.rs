@@ -4,6 +4,7 @@
 //! [`GridDiff`] describing which cells changed.  [`GridDiff::display`]
 //! renders a human-readable summary suitable for MCP tool output.
 
+use crate::mask::DiffMasks;
 use crate::snapshot::{Cell, CellStyle, Color, CursorState, SnapshotGrid};
 use serde::{Deserialize, Serialize};
 
@@ -101,6 +102,20 @@ impl GridDiff {
 /// Cursor comparison is opt-in: if `expected.cursor` is `None` (the case for
 /// all old baselines), cursors are never compared so back-compat is preserved.
 pub fn diff(expected: &SnapshotGrid, actual: &SnapshotGrid) -> GridDiff {
+    diff_masked(expected, actual, &DiffMasks::default())
+}
+
+/// Like [`diff`], but applies regex masks to cell symbols before comparing.
+pub fn diff_masked(expected: &SnapshotGrid, actual: &SnapshotGrid, masks: &DiffMasks) -> GridDiff {
+    if masks.is_empty() {
+        return diff_inner(expected, actual);
+    }
+    let exp = masks.apply_to_grid(expected);
+    let act = masks.apply_to_grid(actual);
+    diff_inner(&exp, &act)
+}
+
+fn diff_inner(expected: &SnapshotGrid, actual: &SnapshotGrid) -> GridDiff {
     let size_mismatch = expected.cols != actual.cols || expected.rows != actual.rows;
 
     if size_mismatch {
@@ -323,5 +338,14 @@ mod tests {
         let d = diff(&exp, &act);
         assert!(!d.is_match());
         assert!(d.cursor_mismatch.is_some());
+    }
+
+    #[test]
+    fn masked_harness_id_matches() {
+        let masks = DiffMasks::compile(&[r"hs-\S+".to_string()]);
+        let exp = grid(&["hs-old-1-2", " ", " "], 3, 1);
+        let act = grid(&["hs-new-9-8", " ", " "], 3, 1);
+        assert!(!diff(&exp, &act).is_match());
+        assert!(diff_masked(&exp, &act, &masks).is_match());
     }
 }
