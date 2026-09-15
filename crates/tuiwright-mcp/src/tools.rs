@@ -5,7 +5,7 @@
 //! auto-generate the dispatch boilerplate.
 
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{ServerCapabilities, ServerInfo};
+use rmcp::model::{ServerCapabilities, ServerConfig};
 use rmcp::{tool, tool_handler, tool_router, ErrorData as McpError, ServerHandler};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -773,19 +773,14 @@ impl TuiwrightServer {
 // ServerHandler impl
 // ---------------------------------------------------------------------------
 
-#[tool_handler]
+#[tool_handler(router = self.tool_router)]
 impl ServerHandler for TuiwrightServer {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            instructions: Some(
-                "Playwright-style tools for developing TUI apps with Claude. \
-                 Use tui_headless for the fast inner loop (deterministic, no PTY); \
-                 use tui_open + tui_send_keys + tui_snapshot for live verification."
-                    .into(),
-            ),
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
-            ..Default::default()
-        }
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
+            "Playwright-style tools for developing TUI apps with Claude. \
+             Use tui_headless for the fast inner loop (deterministic, no PTY); \
+             use tui_open + tui_send_keys + tui_snapshot for live verification.",
+        )
     }
 }
 
