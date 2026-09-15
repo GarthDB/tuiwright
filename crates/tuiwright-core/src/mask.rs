@@ -17,7 +17,9 @@ impl DiffMasks {
         for pat in raw {
             match Regex::new(pat) {
                 Ok(re) => patterns.push(re),
-                Err(err) => eprintln!("tuiwright: ignoring invalid diff.ignore_patterns {pat:?}: {err}"),
+                Err(err) => {
+                    eprintln!("tuiwright: ignoring invalid diff.ignore_patterns {pat:?}: {err}")
+                }
             }
         }
         Self {

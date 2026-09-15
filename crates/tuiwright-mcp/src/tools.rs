@@ -1208,7 +1208,10 @@ mod live_tests {
                 command: Some(bin.to_str().unwrap().to_string()),
                 ..Default::default()
             },
-            size: SizeConfig { cols: 120, rows: 40 },
+            size: SizeConfig {
+                cols: 120,
+                rows: 40,
+            },
             ..Default::default()
         };
         let server = TuiwrightServer::new(config);
@@ -1239,12 +1242,7 @@ mod live_tests {
 
         let guard = server.session.lock().await;
         let live = guard.as_ref().expect("session");
-        let snap = live
-            .session
-            .pane(0, 0)
-            .snapshot()
-            .await
-            .expect("snapshot");
+        let snap = live.session.pane(0, 0).snapshot().await.expect("snapshot");
         assert_eq!(snap.cols, 70, "pane cols after reopen");
         assert_eq!(snap.rows, 40, "pane rows after reopen");
         drop(guard);
