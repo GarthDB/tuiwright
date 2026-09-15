@@ -20,7 +20,7 @@ rust-version = "1.88"
 tuiwright-core = { path = "crates/tuiwright-core", version = "0.2.0" }
 
 # MCP
-rmcp = { version = "0.16", features = ["server", "transport-io"] }
+rmcp = { version = "3.4", features = ["server", "transport-io"] }
 
 # Terminal multiplexer SDK
 rmux-sdk = "0.5"
